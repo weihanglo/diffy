@@ -17,7 +17,7 @@ type Result<T, E = ParsePatchError> = std::result::Result<T, E>;
 pub struct ParsePatchError(Cow<'static, str>);
 
 impl ParsePatchError {
-    fn new<E: Into<Cow<'static, str>>>(e: E) -> Self {
+    pub(crate) fn new<E: Into<Cow<'static, str>>>(e: E) -> Self {
         Self(e.into())
     }
 }
