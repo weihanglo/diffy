@@ -13,7 +13,14 @@ const HUNK_PREFIX: &str = "@@ ";
 const DEV_NULL: &str = "/dev/null";
 
 /// Parse a multi-file patch.
+///
+/// This would strips:
+///
+/// * headers (including email-style headers and commit messages)
+/// * trailing email signature
 pub fn parse(input: &str) -> Result<PatchSet<'_, str>, ParsePatchError> {
+    let input = strip_email_signature(input);
+
     let patch_strs = split_patches(input);
 
     let mut patches = Vec::with_capacity(patch_strs.len());
@@ -102,6 +109,23 @@ fn is_patch_boundary(prev: Option<&str>, line: &str, next: Option<&str>) -> bool
     }
 
     false
+}
+
+/// Strips trailing email signature (RFC 3676).
+///
+/// The signature separator is defined in RFC 3676 Section 4.3 and Section 6:
+/// <https://www.rfc-editor.org/rfc/rfc3676#section-4.3>
+///
+/// ABNF: `sig-sep = "--" SP CRLF`
+///
+/// **Note**: Currently only check for LF line endings (`\n-- \n`).
+/// If the input has CRLF line endings (e.g., from email transport),
+/// the caller must normalize to LF before parsing.
+fn strip_email_signature(input: &str) -> &str {
+    input
+        .rsplit_once("\n-- \n")
+        .map(|(body, _sig)| body)
+        .unwrap_or(input)
 }
 
 /// Extracts the file operation from a patch based on its header paths.
