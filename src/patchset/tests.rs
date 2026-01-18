@@ -148,14 +148,14 @@ In a hole in the ground there lived a hobbit
 @@ -1 +1,2 @@
  food
 +more food
---
+-- 
 2.40.0
 ";
-        let patches = split_patches(content);
-        assert_eq!(patches.len(), 2);
-        assert!(Patch::from_str(patches[0]).is_ok());
-        // Last patch has trailing content `--\n2.40.0` that diffy rejects
-        assert!(Patch::from_str(patches[1]).is_err());
+        // PatchSet::from_str strips the email signature, so both patches parse
+        let patchset = PatchSet::from_str(content).unwrap();
+        assert_eq!(patchset.len(), 2);
+        assert!(patchset.patches()[0].operation().is_modify());
+        assert!(patchset.patches()[1].operation().is_modify());
     }
 
     #[test]
