@@ -33,3 +33,28 @@ jobs:
       - run: cargo fmt -- --check
       - run: cargo clippy --all-targets
       - run: cargo doc --no-deps
+
+  history-replay:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: diffy
+            repo: .
+            commits: 0
+          - name: cargo
+            repo: target/test-repo
+            clone: https://github.com/rust-lang/cargo --depth 201
+            commits: 200
+    name: history-replay (${{ matrix.name }})
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: ${{ matrix.clone && 1 || 0 }}
+      - if: matrix.clone
+        run: git clone ${{ matrix.clone }} ${{ matrix.repo }}
+      - run: rustup toolchain install stable --profile minimal
+      - run: cargo test --release --test git_history_replay -- --nocapture
+        env:
+          DIFFY_TEST_REPO: ${{ matrix.repo }}
+          DIFFY_TEST_COMMITS: ${{ matrix.commits }}

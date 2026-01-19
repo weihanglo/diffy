@@ -21,3 +21,7 @@ anstyle = { version = "1.0.13", optional = true }
 [[example]]
 name = "patch_formatter"
 required-features = ["color"]
+
+[[test]]
+name = "git_history_replay"
+test = false
