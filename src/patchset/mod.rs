@@ -36,7 +36,7 @@ impl<'a> PatchSet<'a, str> {
     /// # Example
     ///
     /// ```
-    /// use diffy::PatchSet;
+    /// use diffy::patchset::{PatchSet, ParseMode};
     ///
     /// let s = "\
     /// --- a/file1.rs
