@@ -61,7 +61,6 @@ fn max_commits() -> usize {
 
 fn git(repo: &PathBuf, args: &[&str]) -> String {
     let mut cmd = Command::new("git");
-    // Run in a clean context without user/system config for reproducibility
     cmd.env("GIT_CONFIG_NOSYSTEM", "1");
     cmd.env("GIT_CONFIG_GLOBAL", "/dev/null");
     cmd.arg("-C").arg(repo);
@@ -77,10 +76,34 @@ fn git(repo: &PathBuf, args: &[&str]) -> String {
     String::from_utf8(output.stdout).expect("git output is not valid UTF-8")
 }
 
+/// Check if a path is a submodule at a specific commit.
+fn is_submodule(repo: &PathBuf, commit: &str, path: &str) -> bool {
+    let mut cmd = Command::new("git");
+    cmd.env("GIT_CONFIG_NOSYSTEM", "1");
+    cmd.env("GIT_CONFIG_GLOBAL", "/dev/null");
+    cmd.arg("-C").arg(repo);
+    cmd.args(["ls-tree", "--format=%(objectmode)", commit, "--", path]);
+
+    let output = cmd.output().expect("failed to execute git ls-tree");
+
+    if !output.status.success() {
+        return false;
+    }
+
+    String::from_utf8_lossy(&output.stdout).trim() == "160000"
+}
+
 /// Get file content at a specific commit.
 ///
-/// Returns `None` if the file is binary (not valid UTF-8).
+/// Returns `None` if:
+///
+/// * The path is a submodule
+/// * The file is binary (not valid UTF-8)
 fn file_at_commit(repo: &PathBuf, commit: &str, path: &str) -> Option<String> {
+    if is_submodule(repo, commit, path) {
+        return None;
+    }
+
     let mut cmd = Command::new("git");
     cmd.env("GIT_CONFIG_NOSYSTEM", "1");
     cmd.env("GIT_CONFIG_GLOBAL", "/dev/null");
@@ -100,8 +123,6 @@ fn file_at_commit(repo: &PathBuf, commit: &str, path: &str) -> Option<String> {
 
 /// Get the list of commits from oldest to newest.
 fn commit_history(repo: &PathBuf, max: usize) -> Vec<String> {
-    // Note: `git rev-list -n N HEAD` returns newest N commits (newest first).
-    // `git rev-list --reverse -n N HEAD` returns OLDEST N commits.
     // We want newest N in chronological order, so: fetch newest, then reverse.
     let output = if max == usize::MAX {
         git(repo, &["rev-list", "--reverse", "HEAD"])
@@ -118,7 +139,6 @@ fn commit_history(repo: &PathBuf, max: usize) -> Vec<String> {
     commits
 }
 
-/// Process a single commit pair and return the result.
 fn process_commit(repo: &PathBuf, idx: usize, parent: &str, child: &str) -> CommitResult {
     let parent_short = parent[..8].to_string();
     let child_short = child[..8].to_string();
@@ -242,7 +262,6 @@ fn test_git_history_replay() {
     let repo = &repo;
 
     thread::scope(|s| {
-        // Spawn worker threads
         for (i, window) in commits.windows(2).enumerate() {
             let tx = tx.clone();
             let parent = &window[0];
@@ -276,7 +295,7 @@ fn test_git_history_replay() {
         }
 
         eprintln!(
-            "History replay completed: {total_applied} patches applied, {total_skipped} skipped (binary)"
+            "History replay completed: {total_applied} patches applied, {total_skipped} skipped"
         );
 
         // Sanity check: we should have applied at least some patches

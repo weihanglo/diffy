@@ -46,6 +46,10 @@ jobs:
             repo: target/test-repo
             clone: https://github.com/rust-lang/cargo --depth 201
             commits: 200
+          - name: rust
+            repo: target/test-repo
+            clone: https://github.com/rust-lang/rust --depth 31
+            commits: 30
     name: history-replay (${{ matrix.name }})
     steps:
       - uses: actions/checkout@v6
