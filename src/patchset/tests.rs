@@ -1,7 +1,7 @@
 //! Tests for patchset parsing.
 
 use super::parse::{extract_file_operation, split_patches};
-use super::{FileOperation, PatchSet};
+use super::{FileOperation, ParseMode, PatchSet};
 use crate::Patch;
 
 mod file_operation {
@@ -60,7 +60,7 @@ mod split_patches {
 +line3
  line4
 ";
-        let patches = split_patches(content);
+        let patches = split_patches(content, ParseMode::UniDiff);
         assert_eq!(patches.len(), 1);
         assert!(Patch::from_str(patches[0]).is_ok());
     }
@@ -79,7 +79,7 @@ mod split_patches {
 -old2
 +new2
 ";
-        let patches = split_patches(content);
+        let patches = split_patches(content, ParseMode::UniDiff);
         assert_eq!(patches.len(), 2);
         assert!(Patch::from_str(patches[0]).is_ok());
         assert!(Patch::from_str(patches[1]).is_ok());
@@ -96,7 +96,7 @@ It should be ignored
 -old
 +new
 ";
-        let patches = split_patches(content);
+        let patches = split_patches(content, ParseMode::UniDiff);
         assert_eq!(patches.len(), 1);
         assert!(Patch::from_str(patches[0]).is_ok());
     }
@@ -113,14 +113,14 @@ It should be ignored
 +--- this line starts with dashes
  line3
 ";
-        let patches = split_patches(content);
+        let patches = split_patches(content, ParseMode::UniDiff);
         assert_eq!(patches.len(), 1);
         assert!(Patch::from_str(patches[0]).is_ok());
     }
 
     #[test]
     fn split_empty_content() {
-        let patches = split_patches("");
+        let patches = split_patches("", ParseMode::UniDiff);
         assert!(patches.is_empty());
     }
 
@@ -151,8 +151,8 @@ In a hole in the ground there lived a hobbit
 -- 
 2.40.0
 ";
-        // PatchSet::from_str strips the email signature, so both patches parse
-        let patchset = PatchSet::from_str(content).unwrap();
+        // PatchSet::parse strips the email signature, so both patches parse
+        let patchset = PatchSet::parse(content, ParseMode::UniDiff).unwrap();
         assert_eq!(patchset.len(), 2);
         assert!(patchset.patches()[0].operation().is_modify());
         assert!(patchset.patches()[1].operation().is_modify());
@@ -161,7 +161,7 @@ In a hole in the ground there lived a hobbit
     #[test]
     fn not_a_patch() {
         let content = "Some random text\nNo patches here\n";
-        let patches = split_patches(content);
+        let patches = split_patches(content, ParseMode::UniDiff);
         assert!(patches.is_empty());
     }
 
@@ -173,7 +173,7 @@ In a hole in the ground there lived a hobbit
 Some random text
 No patches here
 ";
-        let patches = split_patches(content);
+        let patches = split_patches(content, ParseMode::UniDiff);
         assert!(patches.is_empty());
     }
 
@@ -185,7 +185,7 @@ No patches here
 -old
 +new
 ";
-        let patches = split_patches(content);
+        let patches = split_patches(content, ParseMode::UniDiff);
         assert_eq!(patches.len(), 1);
         assert!(Patch::from_str(patches[0]).is_ok());
     }
@@ -198,7 +198,7 @@ No patches here
 -old
 +new
 ";
-        let patches = split_patches(content);
+        let patches = split_patches(content, ParseMode::UniDiff);
         assert_eq!(patches.len(), 1);
         assert!(Patch::from_str(patches[0]).is_ok());
     }
@@ -212,7 +212,7 @@ No patches here
 -old
 +new
 ";
-        let patches = split_patches(content);
+        let patches = split_patches(content, ParseMode::UniDiff);
         assert_eq!(patches.len(), 1);
         assert!(Patch::from_str(patches[0]).is_ok());
     }
@@ -234,7 +234,7 @@ No patches here
 -old3
 +new3
 ";
-        let patches = split_patches(content);
+        let patches = split_patches(content, ParseMode::UniDiff);
         assert_eq!(patches.len(), 3);
         assert!(Patch::from_str(patches[0]).is_ok());
         assert!(Patch::from_str(patches[1]).is_ok());
@@ -322,7 +322,7 @@ mod patchset {
     use super::*;
 
     #[test]
-    fn patchset_from_str() {
+    fn patchset_parse() {
         let content = "\
 --- a/file1.rs
 +++ b/file1.rs
@@ -335,7 +335,7 @@ mod patchset {
 -old2
 +new2
 ";
-        let patchset = PatchSet::from_str(content).unwrap();
+        let patchset = PatchSet::parse(content, ParseMode::UniDiff).unwrap();
         assert_eq!(patchset.len(), 2);
 
         let patch1 = &patchset.patches()[0];
@@ -359,7 +359,7 @@ mod patchset {
 @@ -1 +0,0 @@
 -content
 ";
-        let patchset = PatchSet::from_str(content).unwrap();
+        let patchset = PatchSet::parse(content, ParseMode::UniDiff).unwrap();
         assert_eq!(patchset.len(), 2);
 
         assert!(patchset.patches()[0].operation().is_create());
@@ -375,7 +375,7 @@ mod patchset {
 -old
 +new
 ";
-        let patchset = PatchSet::from_str(content).unwrap();
+        let patchset = PatchSet::parse(content, ParseMode::UniDiff).unwrap();
         assert_eq!(patchset.len(), 1);
 
         let op = patchset.patches()[0].operation();

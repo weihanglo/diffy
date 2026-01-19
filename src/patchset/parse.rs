@@ -1,6 +1,6 @@
 //! Parse multiple file patches from a unified diff.
 
-use super::{FileOperation, FilePatch, PatchSet};
+use super::{FileOperation, FilePatch, ParseMode, PatchSet};
 use crate::{ParsePatchError, Patch};
 
 /// Prefix for the original file path (e.g., `--- a/file.rs`).
@@ -18,10 +18,10 @@ const DEV_NULL: &str = "/dev/null";
 ///
 /// * headers (including email-style headers and commit messages)
 /// * trailing email signature
-pub fn parse(input: &str) -> Result<PatchSet<'_, str>, ParsePatchError> {
+pub fn parse(input: &str, mode: ParseMode) -> Result<PatchSet<'_, str>, ParsePatchError> {
     let input = strip_email_signature(input);
 
-    let patch_strs = split_patches(input);
+    let patch_strs = split_patches(input, mode);
 
     let mut patches = Vec::with_capacity(patch_strs.len());
     for patch_str in patch_strs {
@@ -34,7 +34,7 @@ pub fn parse(input: &str) -> Result<PatchSet<'_, str>, ParsePatchError> {
 }
 
 /// Splits a unified diff containing multiple file patches.
-pub fn split_patches(content: &str) -> Vec<&str> {
+pub fn split_patches(content: &str, mode: ParseMode) -> Vec<&str> {
     let mut patches = Vec::new();
     let mut patch_start = None::<usize>;
     let mut prev_line = None::<&str>;
@@ -45,7 +45,7 @@ pub fn split_patches(content: &str) -> Vec<&str> {
     while let Some(line) = lines.next() {
         let next_line = lines.peek().copied();
 
-        if is_patch_boundary(prev_line, line, next_line) {
+        if is_patch_boundary(prev_line, line, next_line, mode) {
             if let Some(start) = patch_start {
                 patches.push(&content[start..byte_offset]);
             }
@@ -77,7 +77,7 @@ pub fn split_patches(content: &str) -> Vec<&str> {
 /// - `+++ ` followed by `--- ` on the next line
 /// - `--- ` followed by `@@ ` on the next line (missing `+++`)
 /// - `+++ ` followed by `@@ ` on the next line (missing `---`)
-fn is_patch_boundary(prev: Option<&str>, line: &str, next: Option<&str>) -> bool {
+fn is_patch_boundary(prev: Option<&str>, line: &str, next: Option<&str>, _mode: ParseMode) -> bool {
     if line.starts_with(ORIGINAL_PREFIX) {
         // Make sure it isn't part of a (`+++` / `--- `) pair
         if prev.map_or(false, |p| p.starts_with(MODIFIED_PREFIX)) {
