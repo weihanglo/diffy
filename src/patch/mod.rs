@@ -1,5 +1,7 @@
 mod format;
 mod parse;
+#[cfg(feature = "color")]
+mod style;
 
 pub use format::PatchFormatter;
 pub use parse::ParsePatchError;

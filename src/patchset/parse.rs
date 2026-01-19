@@ -80,30 +80,30 @@ pub fn split_patches(content: &str, mode: ParseMode) -> Vec<&str> {
 fn is_patch_boundary(prev: Option<&str>, line: &str, next: Option<&str>, _mode: ParseMode) -> bool {
     if line.starts_with(ORIGINAL_PREFIX) {
         // Make sure it isn't part of a (`+++` / `--- `) pair
-        if prev.map_or(false, |p| p.starts_with(MODIFIED_PREFIX)) {
+        if prev.is_some_and(|p| p.starts_with(MODIFIED_PREFIX)) {
             return false;
         }
         // `--- ` followed by `+++ `
-        if next.map_or(false, |n| n.starts_with(MODIFIED_PREFIX)) {
+        if next.is_some_and(|n| n.starts_with(MODIFIED_PREFIX)) {
             return true;
         }
         // `--- ` followed by `@@ `
-        if next.map_or(false, |n| n.starts_with(HUNK_PREFIX)) {
+        if next.is_some_and(|n| n.starts_with(HUNK_PREFIX)) {
             return true;
         }
     }
 
     if line.starts_with(MODIFIED_PREFIX) {
         // Make sure it isn't part of a (`---` / `+++`) pair
-        if prev.map_or(false, |p| p.starts_with(ORIGINAL_PREFIX)) {
+        if prev.is_some_and(|p| p.starts_with(ORIGINAL_PREFIX)) {
             return false;
         }
         // `+++ ` followed by `--- `
-        if next.map_or(false, |n| n.starts_with(ORIGINAL_PREFIX)) {
+        if next.is_some_and(|n| n.starts_with(ORIGINAL_PREFIX)) {
             return true;
         }
         // `+++ ` followed by `@@ `
-        if next.map_or(false, |n| n.starts_with(HUNK_PREFIX)) {
+        if next.is_some_and(|n| n.starts_with(HUNK_PREFIX)) {
             return true;
         }
     }
