@@ -9,6 +9,24 @@ mod tests;
 
 use crate::{ParsePatchError, Patch};
 
+/// Patch format to parse.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParseMode {
+    /// Standard [unified diff] format.
+    ///
+    /// Supported:
+    ///
+    /// * `---`/`+++` file headers
+    /// * `@@ ... @@` hunks
+    /// * modify and rename files
+    /// * create files (`--- /dev/null`)
+    /// * delete files (`+++ /dev/null`)
+    /// - Skip preamble, headers, and email signature trailer
+    ///
+    /// [unified diff]: https://www.gnu.org/software/diffutils/manual/html_node/Unified-Format.html
+    UniDiff,
+}
+
 /// A collection of patches for multiple files.
 ///
 /// This is typically parsed from the output of `git diff` or `git format-patch`,
@@ -36,7 +54,7 @@ impl<'a> PatchSet<'a, str> {
     /// # Example
     ///
     /// ```
-    /// use diffy::PatchSet;
+    /// use diffy::patchset::{PatchSet, ParseMode};
     ///
     /// let s = "\
     /// --- a/file1.rs
@@ -51,12 +69,12 @@ impl<'a> PatchSet<'a, str> {
     /// +bar
     /// ";
     ///
-    /// let patchset = PatchSet::from_str(s).unwrap();
+    /// // Parse as standard unified diff only
+    /// let patchset = PatchSet::parse(s, ParseMode::UniDiff).unwrap();
     /// assert_eq!(patchset.patches().len(), 2);
     /// ```
-    #[allow(clippy::should_implement_trait)]
-    pub fn from_str(s: &'a str) -> Result<PatchSet<'a, str>, ParsePatchError> {
-        parse::parse(s)
+    pub fn parse(s: &'a str, mode: ParseMode) -> Result<PatchSet<'a, str>, ParsePatchError> {
+        parse::parse(s, mode)
     }
 }
 
