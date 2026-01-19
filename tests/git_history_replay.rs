@@ -20,10 +20,22 @@
 use std::env;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::mpsc;
+use std::thread;
 
 use diffy::patchset::FileOperation;
 use diffy::patchset::ParseMode;
 use diffy::patchset::PatchSet;
+
+/// Result of processing a single commit pair.
+struct CommitResult {
+    idx: usize,
+    parent_short: String,
+    child_short: String,
+    files: Vec<String>,
+    applied: usize,
+    skipped: usize,
+}
 
 /// Get the repository path from environment variable.
 ///
@@ -106,6 +118,109 @@ fn commit_history(repo: &PathBuf, max: usize) -> Vec<String> {
     commits
 }
 
+/// Process a single commit pair and return the result.
+fn process_commit(repo: &PathBuf, idx: usize, parent: &str, child: &str) -> CommitResult {
+    let parent_short = parent[..8].to_string();
+    let child_short = child[..8].to_string();
+    let mut files = Vec::new();
+    let mut applied = 0;
+    let mut skipped = 0;
+
+    let diff_output = git(repo, &["diff", parent, child]);
+
+    if diff_output.is_empty() {
+        // No changes (could be metadata-only commit)
+        return CommitResult {
+            idx,
+            parent_short,
+            child_short,
+            files,
+            applied,
+            skipped,
+        };
+    }
+
+    let patchset = match PatchSet::parse(&diff_output, ParseMode::UniDiff) {
+        Ok(ps) => ps,
+        Err(e) => {
+            panic!(
+                "Failed to parse patch for {parent_short}..{child_short}: {e}\n\n\
+                Diff:\n{diff_output}"
+            );
+        }
+    };
+
+    for file_patch in patchset.iter() {
+        let operation = file_patch.operation().strip_prefix(1);
+
+        let (base_content, expected_content, desc) = match &operation {
+            FileOperation::Create(path) => {
+                let Some(expected) = file_at_commit(repo, child, path) else {
+                    skipped += 1;
+                    continue;
+                };
+                (String::new(), expected, format!("create {path}"))
+            }
+            FileOperation::Delete(path) => {
+                let Some(base) = file_at_commit(repo, parent, path) else {
+                    skipped += 1;
+                    continue;
+                };
+                (base, String::new(), format!("delete {path}"))
+            }
+            FileOperation::Modify { from, to } => {
+                let Some(base) = file_at_commit(repo, parent, from) else {
+                    skipped += 1;
+                    continue;
+                };
+                let Some(expected) = file_at_commit(repo, child, to) else {
+                    skipped += 1;
+                    continue;
+                };
+                let desc = if from == to {
+                    format!("modify {from}")
+                } else {
+                    format!("rename {from} -> {to}")
+                };
+                (base, expected, desc)
+            }
+        };
+
+        let patch = file_patch.patch();
+        let result = match diffy::apply(&base_content, patch) {
+            Ok(r) => r,
+            Err(e) => {
+                panic!(
+                    "Failed to apply patch at {parent_short}..{child_short} for {desc}: {e}\n\n\
+                    Patch:\n{patch}\n\n\
+                    Base content:\n{base_content}"
+                );
+            }
+        };
+
+        if result != expected_content {
+            panic!(
+                "Content mismatch at {parent_short}..{child_short} for {desc}\n\n\
+                --- Expected ---\n{expected_content}\n\n\
+                --- Got ---\n{result}\n\n\
+                --- Patch ---\n{patch}"
+            );
+        }
+
+        applied += 1;
+        files.push(desc);
+    }
+
+    CommitResult {
+        idx,
+        parent_short,
+        child_short,
+        files,
+        applied,
+        skipped,
+    }
+}
+
 #[test]
 fn test_git_history_replay() {
     let repo = repo_path();
@@ -118,109 +233,53 @@ fn test_git_history_replay() {
     }
 
     let total_diffs = commits.len() - 1;
-    let mut total_patches = 0;
-    let mut applied_patches = 0;
-    let mut skipped_binary = 0;
+    let repo_name = repo
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| ".".to_string());
 
-    for (i, window) in commits.windows(2).enumerate() {
-        let idx = i + 1;
-        let parent = &window[0];
-        let child = &window[1];
-        let parent_short = &parent[..8];
-        let child_short = &child[..8];
+    let (tx, rx) = mpsc::channel::<CommitResult>();
+    let repo = &repo;
 
-        let repo_name = repo
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| ".".to_string());
-        eprintln!("[{idx}/{total_diffs}] ({repo_name}) Processing {parent_short}..{child_short}",);
+    thread::scope(|s| {
+        // Spawn worker threads
+        for (i, window) in commits.windows(2).enumerate() {
+            let tx = tx.clone();
+            let parent = &window[0];
+            let child = &window[1];
 
-        let diff_output = git(&repo, &["diff", parent, child]);
-
-        if diff_output.is_empty() {
-            // No changes (could be metadata-only commit)
-            continue;
+            s.spawn(move || {
+                let result = process_commit(repo, i, parent, child);
+                tx.send(result).expect("failed to send result");
+            });
         }
 
-        let patchset = match PatchSet::parse(&diff_output, ParseMode::UniDiff) {
-            Ok(ps) => ps,
-            Err(e) => {
-                panic!(
-                    "Failed to parse patch for {parent_short}..{child_short}: {e}\n\n\
-                    Diff:\n{diff_output}"
-                );
+        drop(tx);
+
+        let mut results: Vec<_> = rx.iter().collect();
+        results.sort_by_key(|r| r.idx);
+
+        let mut total_applied = 0;
+        let mut total_skipped = 0;
+
+        for result in results {
+            let idx = result.idx + 1;
+            eprintln!(
+                "[{idx}/{total_diffs}] ({repo_name}) Processing {}..{}",
+                result.parent_short, result.child_short
+            );
+            for desc in &result.files {
+                eprintln!("  ✓ {desc}");
             }
-        };
-
-        for file_patch in patchset.iter() {
-            total_patches += 1;
-
-            let operation = file_patch.operation().strip_prefix(1);
-
-            let (base_content, expected_content, desc) = match &operation {
-                FileOperation::Create(path) => {
-                    let Some(expected) = file_at_commit(&repo, child, path) else {
-                        skipped_binary += 1;
-                        continue;
-                    };
-                    (String::new(), expected, format!("create {path}"))
-                }
-                FileOperation::Delete(path) => {
-                    let Some(base) = file_at_commit(&repo, parent, path) else {
-                        skipped_binary += 1;
-                        continue;
-                    };
-                    (base, String::new(), format!("delete {path}"))
-                }
-                FileOperation::Modify { from, to } => {
-                    let Some(base) = file_at_commit(&repo, parent, from) else {
-                        skipped_binary += 1;
-                        continue;
-                    };
-                    let Some(expected) = file_at_commit(&repo, child, to) else {
-                        skipped_binary += 1;
-                        continue;
-                    };
-                    let desc = if from == to {
-                        format!("modify {from}")
-                    } else {
-                        format!("rename {from} -> {to}")
-                    };
-                    (base, expected, desc)
-                }
-            };
-
-            let patch = file_patch.patch();
-            let result = match diffy::apply(&base_content, patch) {
-                Ok(r) => r,
-                Err(e) => {
-                    panic!(
-                        "Failed to apply patch at {parent_short}..{child_short} for {desc}: {e}\n\n\
-                        Patch:\n{patch}\n\n\
-                        Base content:\n{base_content}"
-                    );
-                }
-            };
-
-            if result != expected_content {
-                panic!(
-                    "Content mismatch at {parent_short}..{child_short} for {desc}\n\n\
-                    --- Expected ---\n{expected_content}\n\n\
-                    --- Got ---\n{result}\n\n\
-                    --- Patch ---\n{patch}"
-                );
-            }
-
-            applied_patches += 1;
-            eprintln!("  ✓ {desc}");
+            total_applied += result.applied;
+            total_skipped += result.skipped;
         }
-    }
 
-    eprintln!("History replay completed: {applied_patches} patches applied, {skipped_binary} skipped (binary)");
+        eprintln!(
+            "History replay completed: {total_applied} patches applied, {total_skipped} skipped (binary)"
+        );
 
-    // Sanity check: we should have applied at least some patches
-    assert!(
-        applied_patches > 0,
-        "No patches were applied, total_patches={total_patches}"
-    );
+        // Sanity check: we should have applied at least some patches
+        assert!(total_applied > 0, "No patches were applied");
+    });
 }
