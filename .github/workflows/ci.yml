@@ -2,6 +2,9 @@ name: CI
 
 on:
   push:
+    branches:
+      - main
+      - git-format-patch
   pull_request:
 
 env:
