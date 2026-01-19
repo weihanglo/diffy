@@ -19,6 +19,8 @@ const DEV_NULL: &str = "/dev/null";
 /// * headers (including email-style headers and commit messages)
 /// * trailing email signature
 pub fn parse(input: &str, mode: ParseMode) -> Result<PatchSet<'_, str>, ParsePatchError> {
+    // Email signatures would be parsed as a delete line and corrupt the hunk.
+    // Must strip before parsing.
     let input = strip_email_signature(input);
 
     let patch_strs = split_patches(input, mode);
