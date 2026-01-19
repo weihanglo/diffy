@@ -342,6 +342,103 @@ mod tests {
     use super::{parse, parse_bytes};
 
     #[test]
+    fn trailing_garbage_after_complete_hunk() {
+        let s = "\
+--- a/file.txt
++++ b/file.txt
+@@ -1 +1 @@
+-old line
++new line
+this is trailing garbage
+that should be ignored
+";
+        assert!(parse(s).is_err());
+    }
+
+    #[test]
+    fn garbage_before_hunk_complete_fails() {
+        // If hunk line count isn't satisfied, garbage causes error
+        let s = "\
+--- a/file.txt
++++ b/file.txt
+@@ -1,3 +1,3 @@
+-line 1
++LINE 1
+garbage before hunk complete
+ line 3
+";
+        assert!(parse(s).is_err());
+    }
+
+    #[test]
+    fn git_headers_after_hunk_ignored() {
+        // Git extended headers appearing after a complete hunk should be ignored
+        let s = "\
+--- a/file.txt
++++ b/file.txt
+@@ -1 +1 @@
+-old
++new
+diff --git a/other.txt b/other.txt
+index 1234567..89abcdef 100644
+";
+        assert!(parse(s).is_err());
+    }
+
+    #[test]
+    fn multi_hunk_with_trailing_garbage() {
+        let s = "\
+--- a/file.txt
++++ b/file.txt
+@@ -1 +1 @@
+-a
++A
+@@ -5 +5 @@
+-b
++B
+some trailing garbage
+";
+        assert!(parse(s).is_err());
+    }
+
+    #[test]
+    fn garbage_between_hunks_stops_parsing() {
+        // GNU patch would try to parse the second @@ as a new patch
+        // and fail because there's no `---` header.
+        //
+        // diffy `Patch` is a single patch parser, so should just ignore everything
+        // after the first complete hunk when garbage is encountered.
+        let s = "\
+--- a/file.txt
++++ b/file.txt
+@@ -1 +1 @@
+-a
++A
+not a hunk line
+@@ -5 +5 @@
+-b
++B
+";
+        assert!(parse(s).is_err());
+    }
+
+    #[test]
+    fn context_lines_counted_correctly() {
+        let s = "\
+--- a/file.txt
++++ b/file.txt
+@@ -1,4 +1,4 @@
+ context 1
+-deleted
++inserted
+ context 2
+ context 3
+trailing garbage
+";
+        assert!(parse(s).is_err());
+    }
+
+    #[test]
     fn test_escaped_filenames() {
         // No escaped characters
         let s = "\
