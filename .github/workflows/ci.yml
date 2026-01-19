@@ -25,7 +25,7 @@ jobs:
       RUSTFLAGS: -D warnings
     steps:
       - uses: actions/checkout@v6
-      - run: rustup toolchain install stable --profile minimal --component rustfmt clippy
+      - run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
       - run: cargo fmt -- --check
       - run: cargo clippy --all-targets
       - run: cargo doc --no-deps
