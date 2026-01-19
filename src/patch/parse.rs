@@ -204,7 +204,16 @@ fn verify_hunks_in_order<T: ?Sized>(hunks: &[Hunk<'_, T>]) -> bool {
 
 fn hunks<'a, T: Text + ?Sized>(parser: &mut Parser<'a, T>) -> Result<Vec<Hunk<'a, T>>> {
     let mut hunks = Vec::new();
-    while parser.peek().is_some() {
+    // Only continue if the next line is a hunk header (`@@ `).
+    //
+    // When `hunk_lines()` completes a hunk and encounters a non-hunk line
+    // (e.g., git extended header like `diff --git`),
+    // it stops and leaves that content in the parser.
+    // We must not attempt to parse that garbage as another hunk.
+    //
+    // This matches GNU patch behavior that hunks must be contiguous.
+    // Any non-hunk line after a complete hunk terminates hunk parsing for this patch.
+    while parser.peek().is_some_and(|line| line.starts_with("@@ ")) {
         hunks.push(hunk(parser)?);
     }
 
@@ -218,13 +227,7 @@ fn hunks<'a, T: Text + ?Sized>(parser: &mut Parser<'a, T>) -> Result<Vec<Hunk<'a
 
 fn hunk<'a, T: Text + ?Sized>(parser: &mut Parser<'a, T>) -> Result<Hunk<'a, T>> {
     let (range1, range2, function_context) = hunk_header(parser.next()?)?;
-    let lines = hunk_lines(parser)?;
-
-    // check counts of lines to see if they match the ranges in the hunk header
-    let (len1, len2) = super::hunk_lines_count(&lines);
-    if len1 != range1.len || len2 != range2.len {
-        return Err(ParsePatchError::new("Hunk header does not match hunk"));
-    }
+    let lines = hunk_lines(parser, range1.len, range2.len)?;
 
     Ok(Hunk::new(range1, range2, function_context, lines))
 }
@@ -275,13 +278,24 @@ fn range<T: Text + ?Sized>(s: &T) -> Result<HunkRange> {
     Ok(HunkRange::new(start, len))
 }
 
-fn hunk_lines<'a, T: Text + ?Sized>(parser: &mut Parser<'a, T>) -> Result<Vec<Line<'a, T>>> {
+fn hunk_lines<'a, T: Text + ?Sized>(
+    parser: &mut Parser<'a, T>,
+    expected_old: usize,
+    expected_new: usize,
+) -> Result<Vec<Line<'a, T>>> {
     let mut lines: Vec<Line<'a, T>> = Vec::new();
     let mut no_newline_context = false;
     let mut no_newline_delete = false;
     let mut no_newline_insert = false;
 
+    // Track current line counts (old = context + delete, new = context + insert)
+    let mut old_count = 0;
+    let mut new_count = 0;
+
     while let Some(line) = parser.peek() {
+        // Check if hunk is complete
+        let hunk_complete = old_count >= expected_old && new_count >= expected_new;
+
         let line = if line.starts_with("@") {
             break;
         } else if no_newline_context {
@@ -301,10 +315,17 @@ fn hunk_lines<'a, T: Text + ?Sized>(parser: &mut Parser<'a, T>) -> Result<Vec<Li
             }
             Line::Insert(line)
         } else if line.starts_with(NO_NEWLINE_AT_EOF) {
+            // The `\ No newline at end of file` marker indicates
+            // the previous line doesn't end with a newline.
+            // It's not a content line itself.
+            // Therefore, we
+            //
+            // * strip the newline character of the previous line
+            // * don't increment line counts and continue to next directly
             let last_line = lines.pop().ok_or_else(|| {
                 ParsePatchError::new("unexpected 'No newline at end of file' line")
             })?;
-            match last_line {
+            let modified = match last_line {
                 Line::Context(line) => {
                     no_newline_context = true;
                     Line::Context(strip_newline(line)?)
@@ -317,13 +338,40 @@ fn hunk_lines<'a, T: Text + ?Sized>(parser: &mut Parser<'a, T>) -> Result<Vec<Li
                     no_newline_insert = true;
                     Line::Insert(strip_newline(line)?)
                 }
-            }
+            };
+            lines.push(modified);
+            parser.next()?;
+            continue;
         } else {
-            return Err(ParsePatchError::new("unexpected line in hunk body"));
+            // Non-hunk line encountered
+            if hunk_complete {
+                // Hunk is complete, treat remaining content as garbage
+                break;
+            } else {
+                return Err(ParsePatchError::new("unexpected line in hunk body"));
+            }
         };
+
+        match &line {
+            Line::Context(_) => {
+                old_count += 1;
+                new_count += 1;
+            }
+            Line::Delete(_) => {
+                old_count += 1;
+            }
+            Line::Insert(_) => {
+                new_count += 1;
+            }
+        }
 
         lines.push(line);
         parser.next()?;
+    }
+
+    // Final check: ensure we got the expected number of lines
+    if old_count != expected_old || new_count != expected_new {
+        return Err(ParsePatchError::new("Hunk header does not match hunk"));
     }
 
     Ok(lines)
@@ -352,7 +400,10 @@ mod tests {
 this is trailing garbage
 that should be ignored
 ";
-        assert!(parse(s).is_err());
+        let patch = parse(s).unwrap();
+        assert_eq!(patch.hunks().len(), 1);
+        assert_eq!(patch.hunks()[0].old_range().len(), 1);
+        assert_eq!(patch.hunks()[0].new_range().len(), 1);
     }
 
     #[test]
@@ -382,7 +433,8 @@ garbage before hunk complete
 diff --git a/other.txt b/other.txt
 index 1234567..89abcdef 100644
 ";
-        assert!(parse(s).is_err());
+        let patch = parse(s).unwrap();
+        assert_eq!(patch.hunks().len(), 1);
     }
 
     #[test]
@@ -398,7 +450,8 @@ index 1234567..89abcdef 100644
 +B
 some trailing garbage
 ";
-        assert!(parse(s).is_err());
+        let patch = parse(s).unwrap();
+        assert_eq!(patch.hunks().len(), 2);
     }
 
     #[test]
@@ -419,7 +472,9 @@ not a hunk line
 -b
 +B
 ";
-        assert!(parse(s).is_err());
+        let patch = parse(s).unwrap();
+        // Only first hunk is parsed; second @@ is ignored as garbage
+        assert_eq!(patch.hunks().len(), 1);
     }
 
     #[test]
@@ -435,7 +490,10 @@ not a hunk line
  context 3
 trailing garbage
 ";
-        assert!(parse(s).is_err());
+        let patch = parse(s).unwrap();
+        assert_eq!(patch.hunks().len(), 1);
+        assert_eq!(patch.hunks()[0].old_range().len(), 4);
+        assert_eq!(patch.hunks()[0].new_range().len(), 4);
     }
 
     #[test]
