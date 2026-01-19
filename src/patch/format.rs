@@ -182,16 +182,8 @@ impl<T: AsRef<[u8]> + ?Sized> HunkDisplay<'_, T> {
         }
 
         if let Some(ctx) = self.hunk.function_context {
-            let style = style::FUNCTION_CONTEXT;
-            write!(w, " ")?;
-            if self.f.with_color {
-                write!(w, "{style}")?;
-            }
-            write!(w, " ")?;
+            write!(w, "  ")?;
             w.write_all(ctx.as_ref())?;
-            if self.f.with_color {
-                write!(w, "{style:#}")?;
-            }
         }
         writeln!(w)?;
 
@@ -215,15 +207,7 @@ impl Display for HunkDisplay<'_, str> {
         }
 
         if let Some(ctx) = self.hunk.function_context {
-            let style = style::FUNCTION_CONTEXT;
-            write!(f, " ")?;
-            if self.f.with_color {
-                write!(f, "{style}")?;
-            }
-            write!(f, " {}", ctx)?;
-            if self.f.with_color {
-                write!(f, "{style:#}")?;
-            }
+            write!(f, "  {}", ctx)?;
         }
         writeln!(f)?;
 
@@ -243,12 +227,12 @@ struct LineDisplay<'a, T: ?Sized> {
 impl<T: AsRef<[u8]> + ?Sized> LineDisplay<'_, T> {
     fn write_into<W: io::Write>(&self, mut w: W) -> io::Result<()> {
         let (sign, line, style) = match self.line {
-            Line::Context(line) => (' ', line.as_ref(), style::CONTEXT),
-            Line::Delete(line) => ('-', line.as_ref(), style::DELETE),
-            Line::Insert(line) => ('+', line.as_ref(), style::INSERT),
+            Line::Context(line) => (' ', line.as_ref(), None),
+            Line::Delete(line) => ('-', line.as_ref(), Some(style::DELETE)),
+            Line::Insert(line) => ('+', line.as_ref(), Some(style::INSERT)),
         };
 
-        if self.f.with_color {
+        if let (true, Some(style)) = (self.f.with_color, style) {
             write!(w, "{style}")?;
         }
 
@@ -259,7 +243,7 @@ impl<T: AsRef<[u8]> + ?Sized> LineDisplay<'_, T> {
             w.write_all(line)?;
         }
 
-        if self.f.with_color {
+        if let (true, Some(style)) = (self.f.with_color, style) {
             write!(w, "{style:#}")?;
         }
 
@@ -277,12 +261,12 @@ impl<T: AsRef<[u8]> + ?Sized> LineDisplay<'_, T> {
 impl Display for LineDisplay<'_, str> {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         let (sign, line, style) = match self.line {
-            Line::Context(line) => (' ', line, style::CONTEXT),
-            Line::Delete(line) => ('-', line, style::DELETE),
-            Line::Insert(line) => ('+', line, style::INSERT),
+            Line::Context(line) => (' ', line, None),
+            Line::Delete(line) => ('-', line, Some(style::DELETE)),
+            Line::Insert(line) => ('+', line, Some(style::INSERT)),
         };
 
-        if self.f.with_color {
+        if let (true, Some(style)) = (self.f.with_color, style) {
             write!(f, "{style}")?;
         }
 
@@ -292,7 +276,7 @@ impl Display for LineDisplay<'_, str> {
             write!(f, "{}{}", sign, line)?;
         }
 
-        if self.f.with_color {
+        if let (true, Some(style)) = (self.f.with_color, style) {
             write!(f, "{style:#}")?;
         }
 
