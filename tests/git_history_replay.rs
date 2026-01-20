@@ -12,6 +12,8 @@
 //!   Defaults to the package directory (`CARGO_MANIFEST_DIR`).
 //! * `DIFFY_TEST_COMMITS`: Maximum number of commits to verify.
 //!   Defaults to 200. Use `0` to verify entire history.
+//! * `DIFFY_TEST_PARSE_MODE`: Parse mode to use (`unidiff` or `gitdiff`).
+//!   Defaults to `unidiff`.
 //!
 //! ## Requirements
 //!
@@ -56,6 +58,17 @@ fn max_commits() -> usize {
     } else {
         val.parse()
             .unwrap_or_else(|e| panic!("invalid DIFFY_TEST_COMMITS='{val}': {e}"))
+    }
+}
+
+fn parse_mode() -> ParseMode {
+    let Ok(val) = env::var("DIFFY_TEST_PARSE_MODE") else {
+        return ParseMode::UniDiff;
+    };
+    match val.trim().to_lowercase().as_str() {
+        "unidiff" => ParseMode::UniDiff,
+        "gitdiff" => ParseMode::GitDiff,
+        _ => panic!("invalid DIFFY_TEST_PARSE_MODE='{val}': expected 'unidiff' or 'gitdiff'"),
     }
 }
 
@@ -124,13 +137,15 @@ fn file_at_commit(repo: &PathBuf, commit: &str, path: &str) -> Option<String> {
 /// Get the list of commits from oldest to newest.
 fn commit_history(repo: &PathBuf, max: usize) -> Vec<String> {
     // We want newest N in chronological order, so: fetch newest, then reverse.
+    // Use --first-parent to ensure consecutive commits are actual parent-child pairs,
+    // not unrelated commits from different branches before a merge.
     let output = if max == usize::MAX {
-        git(repo, &["rev-list", "--reverse", "HEAD"])
+        git(repo, &["rev-list", "--first-parent", "--reverse", "HEAD"])
     } else {
         // fetches only the most recent `max + 1` commits
         // to have `max` commit pairs for diffing.
         let n = (max + 1).to_string();
-        git(repo, &["rev-list", "-n", &n, "HEAD"])
+        git(repo, &["rev-list", "--first-parent", "-n", &n, "HEAD"])
     };
     let mut commits: Vec<_> = output.lines().map(String::from).collect();
     if max != usize::MAX {
@@ -139,7 +154,13 @@ fn commit_history(repo: &PathBuf, max: usize) -> Vec<String> {
     commits
 }
 
-fn process_commit(repo: &PathBuf, idx: usize, parent: &str, child: &str) -> CommitResult {
+fn process_commit(
+    repo: &PathBuf,
+    idx: usize,
+    parent: &str,
+    child: &str,
+    mode: ParseMode,
+) -> CommitResult {
     let parent_short = parent[..8].to_string();
     let child_short = child[..8].to_string();
     let mut files = Vec::new();
@@ -160,7 +181,7 @@ fn process_commit(repo: &PathBuf, idx: usize, parent: &str, child: &str) -> Comm
         };
     }
 
-    let patchset = match PatchSet::parse(&diff_output, ParseMode::UniDiff) {
+    let patchset = match PatchSet::parse(&diff_output, mode) {
         Ok(ps) => ps,
         Err(e) => {
             panic!(
@@ -245,6 +266,7 @@ fn process_commit(repo: &PathBuf, idx: usize, parent: &str, child: &str) -> Comm
 fn test_git_history_replay() {
     let repo = repo_path();
     let max = max_commits();
+    let mode = parse_mode();
     let commits = commit_history(&repo, max);
 
     if commits.len() < 2 {
@@ -257,6 +279,10 @@ fn test_git_history_replay() {
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| ".".to_string());
+    let mode_name = match mode {
+        ParseMode::UniDiff => "unidiff",
+        ParseMode::GitDiff => "gitdiff",
+    };
 
     let (tx, rx) = mpsc::channel::<CommitResult>();
     let repo = &repo;
@@ -268,7 +294,7 @@ fn test_git_history_replay() {
             let child = &window[1];
 
             s.spawn(move || {
-                let result = process_commit(repo, i, parent, child);
+                let result = process_commit(repo, i, parent, child, mode);
                 tx.send(result).expect("failed to send result");
             });
         }
@@ -284,7 +310,7 @@ fn test_git_history_replay() {
         for result in results {
             let idx = result.idx + 1;
             eprintln!(
-                "[{idx}/{total_diffs}] ({repo_name}) Processing {}..{}",
+                "[{idx}/{total_diffs}] ({repo_name}, {mode_name}) Processing {}..{}",
                 result.parent_short, result.child_short
             );
             for desc in &result.files {
