@@ -25,6 +25,11 @@ pub enum ParseMode {
     ///
     /// [unified diff]: https://www.gnu.org/software/diffutils/manual/html_node/Unified-Format.html
     UniDiff,
+
+    /// [Git extended diff format][git-diff-format].
+    ///
+    /// [git-diff-format]: https://git-scm.com/docs/diff-format
+    GitDiff,
 }
 
 /// A collection of patches for multiple files.

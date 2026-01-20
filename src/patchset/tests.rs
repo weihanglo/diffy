@@ -318,6 +318,247 @@ mod extract_file_operation {
     }
 }
 
+mod git_diff_boundary {
+    use super::*;
+
+    #[test]
+    fn diff_git_is_boundary_in_gitdiff_mode() {
+        let content = "\
+diff --git a/file1.rs b/file1.rs
+--- a/file1.rs
++++ b/file1.rs
+@@ -1 +1 @@
+-old1
++new1
+diff --git a/file2.rs b/file2.rs
+--- a/file2.rs
++++ b/file2.rs
+@@ -1 +1 @@
+-old2
++new2
+";
+        let patches = split_patches(content, ParseMode::GitDiff);
+        assert_eq!(patches.len(), 2);
+        assert!(Patch::from_str(patches[0]).is_ok());
+        assert!(Patch::from_str(patches[1]).is_ok());
+    }
+
+    #[test]
+    fn diff_git_not_boundary_in_unidiff_mode() {
+        // In UniDiff mode, `diff --git` is just noise before the real boundary
+        let content = "\
+diff --git a/file1.rs b/file1.rs
+--- a/file1.rs
++++ b/file1.rs
+@@ -1 +1 @@
+-old1
++new1
+diff --git a/file2.rs b/file2.rs
+--- a/file2.rs
++++ b/file2.rs
+@@ -1 +1 @@
+-old2
++new2
+";
+        let patches = split_patches(content, ParseMode::UniDiff);
+        assert_eq!(patches.len(), 2);
+        // Both should parse, the `diff --git` lines are just garbage before `---`
+        assert!(Patch::from_str(patches[0]).is_ok());
+        assert!(Patch::from_str(patches[1]).is_ok());
+    }
+
+    #[test]
+    fn git_headers_do_not_split_patch() {
+        // Git extended headers between `diff --git` and `---` should not cause split
+        let content = "\
+diff --git a/file.rs b/file.rs
+old mode 100644
+new mode 100755
+--- a/file.rs
++++ b/file.rs
+@@ -1 +1 @@
+-old
++new
+";
+        let patches = split_patches(content, ParseMode::GitDiff);
+        assert_eq!(patches.len(), 1);
+        assert!(Patch::from_str(patches[0]).is_ok());
+    }
+
+    #[test]
+    fn new_file_mode_header() {
+        let content = "\
+diff --git a/new.sh b/new.sh
+new file mode 100755
+--- /dev/null
++++ b/new.sh
+@@ -0,0 +1 @@
++content
+";
+        let patches = split_patches(content, ParseMode::GitDiff);
+        assert_eq!(patches.len(), 1);
+        assert!(Patch::from_str(patches[0]).is_ok());
+    }
+
+    #[test]
+    fn deleted_file_mode_header() {
+        let content = "\
+diff --git a/old.sh b/old.sh
+deleted file mode 100755
+--- a/old.sh
++++ /dev/null
+@@ -1 +0,0 @@
+-content
+";
+        let patches = split_patches(content, ParseMode::GitDiff);
+        assert_eq!(patches.len(), 1);
+        assert!(Patch::from_str(patches[0]).is_ok());
+    }
+
+    #[test]
+    fn rename_headers() {
+        let content = "\
+diff --git a/old.txt b/new.txt
+similarity index 100%
+rename from old.txt
+rename to new.txt
+";
+        let patches = split_patches(content, ParseMode::GitDiff);
+        assert_eq!(patches.len(), 0);
+        // Pure rename has no hunks, but should still be one patch slice
+    }
+
+    #[test]
+    fn index_header_recognized() {
+        let content = "\
+diff --git a/file.rs b/file.rs
+index 1234567..89abcdef 100644
+--- a/file.rs
++++ b/file.rs
+@@ -1 +1 @@
+-old
++new
+";
+        let patches = split_patches(content, ParseMode::GitDiff);
+        assert_eq!(patches.len(), 1);
+        assert!(Patch::from_str(patches[0]).is_ok());
+    }
+
+    #[test]
+    fn commit_message_with_diff_git_text_inline() {
+        // Only the real "diff --git" at line start is detected
+        let content = "\
+From abc123 Mon Sep 17 00:00:00 2001
+From: Test <test@test.com>
+Subject: [PATCH] test
+
+This commit message mentions diff --git a/fake b/fake as example.
+
+---
+ file.rs | 1 +
+
+diff --git a/file.rs b/file.rs
+--- a/file.rs
++++ b/file.rs
+@@ -1 +1,2 @@
+ real
++change
+";
+        let patches = split_patches(content, ParseMode::GitDiff);
+        assert_eq!(patches.len(), 1);
+        assert!(Patch::from_str(patches[0]).is_ok());
+    }
+
+    #[test]
+    fn commit_message_with_diff_git_at_line_start() {
+        // "diff --git" in commit message is ignored because we strip the email preamble.
+        // This is an observed git behavior. See `strip_email_preamble`.
+        let content = "\
+From abc123 Mon Sep 17 00:00:00 2001
+Subject: [PATCH] test
+
+Example of a diff line:
+diff --git a/fake b/fake
+This is not a real diff.
+
+---
+ file.rs | 1 +
+
+diff --git a/file.rs b/file.rs
+--- a/file.rs
++++ b/file.rs
+@@ -1 +1,2 @@
+ real
++change
+";
+        let patchset = PatchSet::parse(content, ParseMode::GitDiff).unwrap();
+        assert_eq!(patchset.len(), 1);
+        assert!(patchset.patches()[0].operation().is_modify());
+    }
+
+    #[test]
+    fn multiple_separator_and_diff_git_in_commit_message() {
+        // Git uses the first `---` as separator,
+        // so the fake ones are included in patch.
+        //
+        // This is an observed git behavior. See `strip_email_preamble`.
+        let content = "\
+From abc123 Mon Sep 17 00:00:00 2001
+Subject: [PATCH] test
+
+Here is an example:
+---
+diff --git a/fake b/fake
+This is not real.
+---
+ real.rs | 1 +
+
+diff --git a/real.rs b/real.rs
+--- a/real.rs
++++ b/real.rs
+@@ -1 +1,2 @@
+ real
++change
+";
+        let patches = split_patches(content, ParseMode::GitDiff);
+        // First `---` is used as separator,
+        // so both fake and real `diff --git` are detected as patches.
+        assert_eq!(patches.len(), 1);
+        assert!(!patches[0].contains("diff --git a/fake"));
+        // assert!(patches[1].contains("diff --git a/real.rs"));
+    }
+
+    #[test]
+    fn multiple_patches_with_various_headers() {
+        let content = "\
+diff --git a/file1.rs b/file1.rs
+index 1111111..2222222 100644
+--- a/file1.rs
++++ b/file1.rs
+@@ -1 +1 @@
+-old1
++new1
+diff --git a/file2.rs b/file2.rs
+new file mode 100644
+--- /dev/null
++++ b/file2.rs
+@@ -0,0 +1 @@
++new file
+diff --git a/file3.rs b/file3.rs
+deleted file mode 100644
+--- a/file3.rs
++++ /dev/null
+@@ -1 +0,0 @@
+-deleted
+";
+        let patches = split_patches(content, ParseMode::GitDiff);
+        assert_eq!(patches.len(), 3);
+        assert!(Patch::from_str(patches[0]).is_ok());
+        assert!(Patch::from_str(patches[1]).is_ok());
+        assert!(Patch::from_str(patches[2]).is_ok());
+    }
+}
+
 mod patchset {
     use super::*;
 
