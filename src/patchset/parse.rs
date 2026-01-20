@@ -12,16 +12,29 @@ const HUNK_PREFIX: &str = "@@ ";
 /// Path used to indicate file creation or deletion.
 const DEV_NULL: &str = "/dev/null";
 
+/// Prefix for git diff header (e.g., `diff --git a/file b/file`).
+const GIT_DIFF_PREFIX: &str = "diff --git ";
+
+/// Separator between commit message and patch in git format-patch output.
+const EMAIL_PREAMBLE_SEPARATOR: &str = "\n---\n";
+
 /// Parse a multi-file patch.
 ///
-/// This would strips:
+/// This strips:
 ///
-/// * headers (including email-style headers and commit messages)
+/// * email preamble (headers and commit message before `---` separator)
 /// * trailing email signature
 pub fn parse(input: &str, mode: ParseMode) -> Result<PatchSet<'_, str>, ParsePatchError> {
     // Email signatures would be parsed as a delete line and corrupt the hunk.
     // Must strip before parsing.
     let input = strip_email_signature(input);
+
+    // In GitDiff mode, strip email preamble to avoid false `diff --git` matches
+    // in commit messages.
+    let input = match mode {
+        ParseMode::GitDiff => strip_email_preamble(input),
+        ParseMode::UniDiff => input,
+    };
 
     let patch_strs = split_patches(input, mode);
 
@@ -72,14 +85,29 @@ pub fn split_patches(content: &str, mode: ParseMode) -> Vec<&str> {
 }
 
 /// Checks if the current line is a patch boundary.
+fn is_patch_boundary(prev: Option<&str>, line: &str, next: Option<&str>, mode: ParseMode) -> bool {
+    match mode {
+        ParseMode::GitDiff => is_gitdiff_boundary(line),
+        ParseMode::UniDiff => is_unidiff_boundary(prev, line, next),
+    }
+}
+
+/// Checks if the current line is a patch boundary in GitDiff mode.
+///
+/// Only `diff --git ` is recognized as a boundary.
+fn is_gitdiff_boundary(line: &str) -> bool {
+    line.starts_with(GIT_DIFF_PREFIX)
+}
+
+/// Checks if the current line is a patch boundary in UniDiff mode.
 ///
 /// A patch boundary is one of:
 ///
-/// - `--- ` followed by `+++ ` on the next line
-/// - `+++ ` followed by `--- ` on the next line
-/// - `--- ` followed by `@@ ` on the next line (missing `+++`)
-/// - `+++ ` followed by `@@ ` on the next line (missing `---`)
-fn is_patch_boundary(prev: Option<&str>, line: &str, next: Option<&str>, _mode: ParseMode) -> bool {
+/// * `--- ` followed by `+++ ` on the next line
+/// * `+++ ` followed by `--- ` on the next line
+/// * `--- ` followed by `@@ ` on the next line (missing `+++`)
+/// * `+++ ` followed by `@@ ` on the next line (missing `---`)
+fn is_unidiff_boundary(prev: Option<&str>, line: &str, next: Option<&str>) -> bool {
     if line.starts_with(ORIGINAL_PREFIX) {
         // Make sure it isn't part of a (`+++` / `--- `) pair
         if prev.is_some_and(|p| p.starts_with(MODIFIED_PREFIX)) {
@@ -111,6 +139,29 @@ fn is_patch_boundary(prev: Option<&str>, line: &str, next: Option<&str>, _mode: 
     }
 
     false
+}
+
+/// Strips email preamble (headers and commit message) from `git format-patch` output.
+///
+/// Returns the content after the first `\n---\n` separator.
+/// If no separator is found, returns the entire input.
+///
+/// ## Observed git behavior
+///
+/// `git mailinfo` (used by `git am`) uses the first `---` line
+/// as the separator between commit message and patch content.
+/// It does not check if `diff --git` follows or there are more `---` lines.
+///
+/// From [`git format-patch`] manpage:
+///
+/// > The log message and the patch are separated by a line with a three-dash line.
+///
+/// [`git format-patch`]: https://git-scm.com/docs/git-format-patch>:
+fn strip_email_preamble(input: &str) -> &str {
+    input
+        .split_once(EMAIL_PREAMBLE_SEPARATOR)
+        .map(|(_, after)| after)
+        .unwrap_or(input)
 }
 
 /// Strips trailing email signature (RFC 3676).

@@ -424,7 +424,7 @@ rename from old.txt
 rename to new.txt
 ";
         let patches = split_patches(content, ParseMode::GitDiff);
-        assert_eq!(patches.len(), 0);
+        assert_eq!(patches.len(), 1);
         // Pure rename has no hunks, but should still be one patch slice
     }
 
@@ -523,9 +523,9 @@ diff --git a/real.rs b/real.rs
         let patches = split_patches(content, ParseMode::GitDiff);
         // First `---` is used as separator,
         // so both fake and real `diff --git` are detected as patches.
-        assert_eq!(patches.len(), 1);
-        assert!(!patches[0].contains("diff --git a/fake"));
-        // assert!(patches[1].contains("diff --git a/real.rs"));
+        assert_eq!(patches.len(), 2);
+        assert!(patches[0].contains("diff --git a/fake"));
+        assert!(patches[1].contains("diff --git a/real.rs"));
     }
 
     #[test]
