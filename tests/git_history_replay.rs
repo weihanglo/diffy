@@ -167,7 +167,12 @@ fn process_commit(
     let mut applied = 0;
     let mut skipped = 0;
 
-    let diff_output = git(repo, &["diff", parent, child]);
+    // UniDiff format cannot express pure renames (no ---/+++ headers).
+    // Use `--no-renames` to represent them as delete + create instead.
+    let diff_output = match mode {
+        ParseMode::UniDiff => git(repo, &["diff", "--no-renames", parent, child]),
+        ParseMode::GitDiff => git(repo, &["diff", parent, child]),
+    };
 
     if diff_output.is_empty() {
         // No changes (could be metadata-only commit)
@@ -190,6 +195,28 @@ fn process_commit(
             );
         }
     };
+
+    // Verify we parsed the same number of patches as git reports files changed.
+    // This catches cases where patches are silently skipped.
+    let expected_file_count = match mode {
+        ParseMode::UniDiff => git(
+            repo,
+            &["diff", "--name-status", "--no-renames", parent, child],
+        ),
+        ParseMode::GitDiff => git(repo, &["diff", "--name-status", parent, child]),
+    }
+    .lines()
+    .filter(|l| !l.is_empty())
+    .count();
+
+    if patchset.len() != expected_file_count {
+        let n = patchset.len();
+        panic!(
+            "Patch count mismatch for {parent_short}..{child_short}: \
+             expected {expected_file_count} files, parsed {n} patches\n\n\
+             Diff:\n{diff_output}",
+        );
+    }
 
     for file_patch in patchset.iter() {
         let operation = file_patch.operation().strip_prefix(1);
