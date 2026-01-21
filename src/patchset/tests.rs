@@ -10,15 +10,15 @@ mod file_operation {
     #[test]
     fn test_strip_prefix() {
         let op = FileOperation::Modify {
-            from: "a/src/lib.rs".to_owned(),
-            to: "b/src/lib.rs".to_owned(),
+            original: "a/src/lib.rs".to_owned(),
+            modified: "b/src/lib.rs".to_owned(),
         };
         let stripped = op.strip_prefix(1);
         assert_eq!(
             stripped,
             FileOperation::Modify {
-                from: "src/lib.rs".to_owned(),
-                to: "src/lib.rs".to_owned(),
+                original: "src/lib.rs".to_owned(),
+                modified: "src/lib.rs".to_owned(),
             }
         );
     }
@@ -28,21 +28,6 @@ mod file_operation {
         let op = FileOperation::Create("file.rs".to_owned());
         let stripped = op.strip_prefix(1);
         assert_eq!(stripped, FileOperation::Create("file.rs".to_owned()));
-    }
-
-    #[test]
-    fn test_is_rename() {
-        let modify_same = FileOperation::Modify {
-            from: "file.rs".to_owned(),
-            to: "file.rs".to_owned(),
-        };
-        assert!(!modify_same.is_rename());
-
-        let rename = FileOperation::Modify {
-            from: "old.rs".to_owned(),
-            to: "new.rs".to_owned(),
-        };
-        assert!(rename.is_rename());
     }
 }
 
@@ -251,8 +236,8 @@ mod extract_file_operation {
         assert_eq!(
             op,
             FileOperation::Modify {
-                from: "a/src/lib.rs".to_owned(),
-                to: "b/src/lib.rs".to_owned(),
+                original: "a/src/lib.rs".to_owned(),
+                modified: "b/src/lib.rs".to_owned(),
             }
         );
     }
@@ -270,13 +255,13 @@ mod extract_file_operation {
     }
 
     #[test]
-    fn rename() {
+    fn different_paths() {
         let op = extract_file_operation(Some("a/old_name.rs"), Some("b/new_name.rs")).unwrap();
         assert_eq!(
             op,
             FileOperation::Modify {
-                from: "a/old_name.rs".to_owned(),
-                to: "b/new_name.rs".to_owned(),
+                original: "a/old_name.rs".to_owned(),
+                modified: "b/new_name.rs".to_owned(),
             }
         );
     }
@@ -287,8 +272,8 @@ mod extract_file_operation {
         assert_eq!(
             op,
             FileOperation::Modify {
-                from: "a/src/lib.rs".to_owned(),
-                to: "a/src/lib.rs".to_owned(),
+                original: "a/src/lib.rs".to_owned(),
+                modified: "a/src/lib.rs".to_owned(),
             }
         );
     }
@@ -299,8 +284,8 @@ mod extract_file_operation {
         assert_eq!(
             op,
             FileOperation::Modify {
-                from: "b/src/lib.rs".to_owned(),
-                to: "b/src/lib.rs".to_owned(),
+                original: "b/src/lib.rs".to_owned(),
+                modified: "b/src/lib.rs".to_owned(),
             }
         );
     }
@@ -608,7 +593,7 @@ mod patchset {
     }
 
     #[test]
-    fn patchset_rename() {
+    fn patchset_different_paths() {
         let content = "\
 --- a/old_name.rs
 +++ b/new_name.rs
@@ -619,7 +604,16 @@ mod patchset {
         let patchset = PatchSet::parse(content, ParseMode::UniDiff).unwrap();
         assert_eq!(patchset.len(), 1);
 
+        // Different paths produce Modify, not Rename.
+        // Rename is only produced from explicit git headers.
         let op = patchset.patches()[0].operation();
-        assert!(op.is_rename());
+        assert!(op.is_modify());
+        assert_eq!(
+            op,
+            &FileOperation::Modify {
+                original: "a/old_name.rs".to_owned(),
+                modified: "b/new_name.rs".to_owned(),
+            }
+        );
     }
 }

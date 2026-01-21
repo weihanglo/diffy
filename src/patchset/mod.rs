@@ -175,18 +175,28 @@ impl<'a, T: ToOwned + ?Sized> FilePatch<'a, T> {
 /// The operation to perform based on a patch.
 ///
 /// This is determined by examining the `---` and `+++` header lines
-/// of a unified diff patch.
+/// of a unified diff patch, and git extended headers when available.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FileOperation {
     /// Delete a file (`+++ /dev/null`).
     Delete(String),
     /// Create a new file (`--- /dev/null`).
     Create(String),
-    /// Modify or rename a file.
+    /// Modify a file.
     ///
-    /// * `from == to` → modify file in place
-    /// * `from != to` → rename (read from `from`, write to `to`, delete `from`)
-    Modify { from: String, to: String },
+    /// * If `original == modified`, this is an in-place modification.
+    /// * If they differ, the caller decides how to handle, e.g., treat as rename or error.
+    ///
+    /// Usually, the caller needs to strip the prefix from the paths to determine.
+    Modify { original: String, modified: String },
+    /// Rename a file (move from `from` to `to`, delete `from`).
+    ///
+    /// Only produced when git extended headers explicitly indicate a rename.
+    Rename { from: String, to: String },
+    /// Copy a file (copy from `from` to `to`, keep `from`).
+    ///
+    /// Only produced when git extended headers explicitly indicate a copy.
+    Copy { from: String, to: String },
 }
 
 impl FileOperation {
@@ -209,7 +219,15 @@ impl FileOperation {
         match self {
             FileOperation::Delete(path) => FileOperation::Delete(strip(path, n)),
             FileOperation::Create(path) => FileOperation::Create(strip(path, n)),
-            FileOperation::Modify { from, to } => FileOperation::Modify {
+            FileOperation::Modify { original, modified } => FileOperation::Modify {
+                original: strip(original, n),
+                modified: strip(modified, n),
+            },
+            FileOperation::Rename { from, to } => FileOperation::Rename {
+                from: strip(from, n),
+                to: strip(to, n),
+            },
+            FileOperation::Copy { from, to } => FileOperation::Copy {
                 from: strip(from, n),
                 to: strip(to, n),
             },
@@ -226,13 +244,18 @@ impl FileOperation {
         matches!(self, FileOperation::Delete(_))
     }
 
-    /// Returns `true` if this is a file modification (including rename).
+    /// Returns `true` if this is a file modification.
     pub fn is_modify(&self) -> bool {
         matches!(self, FileOperation::Modify { .. })
     }
 
-    /// Returns `true` if this is a rename operation (modify where `from != to`).
+    /// Returns `true` if this is a rename operation.
     pub fn is_rename(&self) -> bool {
-        matches!(self, FileOperation::Modify { from, to } if from != to)
+        matches!(self, FileOperation::Rename { .. })
+    }
+
+    /// Returns `true` if this is a copy operation.
+    pub fn is_copy(&self) -> bool {
+        matches!(self, FileOperation::Copy { .. })
     }
 }
