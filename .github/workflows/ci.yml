@@ -42,15 +42,41 @@ jobs:
           - name: diffy
             repo: .
             commits: 0
+            parse_mode: unidiff
+          - name: diffy
+            repo: .
+            commits: 0
+            parse_mode: gitdiff
           - name: cargo
             repo: target/test-repo
             clone: https://github.com/rust-lang/cargo --depth 201
             commits: 200
+            parse_mode: unidiff
+          - name: cargo
+            repo: target/test-repo
+            clone: https://github.com/rust-lang/cargo --depth 201
+            commits: 200
+            parse_mode: gitdiff
           - name: rust
             repo: target/test-repo
             clone: https://github.com/rust-lang/rust --depth 31
             commits: 30
-    name: history-replay (${{ matrix.name }})
+            parse_mode: unidiff
+          - name: rust
+            repo: target/test-repo
+            clone: https://github.com/rust-lang/rust --depth 31
+            commits: 30
+            parse_mode: gitdiff
+    name: history-replay (${{ matrix.name }}, ${{ matrix.parse_mode }})
+    # GitDiff mode doesn't yet handle no-hunk patches, for example pure renames:
+    #
+    #     diff --git a/src/patch.rs b/src/patch/mod.rs
+    #     similarity index 100%
+    #     rename from src/patch.rs
+    #     rename to src/patch/mod.rs
+    #
+    # Track progress without blocking CI.
+    continue-on-error: ${{ matrix.parse_mode == 'gitdiff' }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -62,3 +88,4 @@ jobs:
         env:
           DIFFY_TEST_REPO: ${{ matrix.repo }}
           DIFFY_TEST_COMMITS: ${{ matrix.commits }}
+          DIFFY_TEST_PARSE_MODE: ${{ matrix.parse_mode }}
