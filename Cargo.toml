@@ -25,3 +25,6 @@ required-features = ["color"]
 [[test]]
 name = "git_history_replay"
 test = false
+
+[dev-dependencies]
+snapbox = { version = "0.6.24", features = ["dir"] }
