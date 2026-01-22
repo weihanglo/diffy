@@ -205,22 +205,25 @@ pub fn extract_file_operation(
         Ok(FileOperation::Create(path.to_owned()))
     } else {
         match (original, modified) {
-            (Some(from), Some(to)) => Ok(FileOperation::Modify {
-                from: from.to_owned(),
-                to: to.to_owned(),
+            (Some(original), Some(modified)) => Ok(FileOperation::Modify {
+                original: original.to_owned(),
+                modified: modified.to_owned(),
             }),
-            (None, Some(to)) => {
+            (None, Some(modified)) => {
                 // No original path, but has modified path.
-                // This is a modify operation (not create) - GNU patch reads from the modified path.
+                // Observed that GNU patch reads from the modified path in this case.
                 Ok(FileOperation::Modify {
-                    from: to.to_owned(),
-                    to: to.to_owned(),
+                    original: modified.to_owned(),
+                    modified: modified.to_owned(),
                 })
             }
-            (Some(from), None) => Ok(FileOperation::Modify {
-                from: from.to_owned(),
-                to: from.to_owned(),
-            }),
+            (Some(original), None) => {
+                // No modified path, but has original path.
+                Ok(FileOperation::Modify {
+                    original: original.to_owned(),
+                    modified: original.to_owned(),
+                })
+            }
             (None, None) => Err(ParsePatchError::new("patch has no file path")),
         }
     }

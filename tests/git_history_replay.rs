@@ -236,7 +236,23 @@ fn process_commit(
                 };
                 (base, String::new(), format!("delete {path}"))
             }
-            FileOperation::Modify { from, to } => {
+            FileOperation::Modify { original, modified } => {
+                let Some(base) = file_at_commit(repo, parent, original) else {
+                    skipped += 1;
+                    continue;
+                };
+                let Some(expected) = file_at_commit(repo, child, modified) else {
+                    skipped += 1;
+                    continue;
+                };
+                let desc = if original == modified {
+                    format!("modify {original}")
+                } else {
+                    format!("modify {original} -> {modified}")
+                };
+                (base, expected, desc)
+            }
+            FileOperation::Rename { from, to } => {
                 let Some(base) = file_at_commit(repo, parent, from) else {
                     skipped += 1;
                     continue;
@@ -245,12 +261,18 @@ fn process_commit(
                     skipped += 1;
                     continue;
                 };
-                let desc = if from == to {
-                    format!("modify {from}")
-                } else {
-                    format!("rename {from} -> {to}")
+                (base, expected, format!("rename {from} -> {to}"))
+            }
+            FileOperation::Copy { from, to } => {
+                let Some(base) = file_at_commit(repo, parent, from) else {
+                    skipped += 1;
+                    continue;
                 };
-                (base, expected, desc)
+                let Some(expected) = file_at_commit(repo, child, to) else {
+                    skipped += 1;
+                    continue;
+                };
+                (base, expected, format!("copy {from} -> {to}"))
             }
         };
 
