@@ -1,5 +1,8 @@
 //! Validate PatchSet parsing and application by replaying a git repository's history.
 //!
+//! Note: Git extended header paths (rename/copy) don't have a/b prefixes,
+//! while ---/+++ paths do. This test handles both cases appropriately.
+//!
 //! ## Usage
 //!
 //! ```console
@@ -28,6 +31,18 @@ use std::thread;
 use diffy::patchset::FileOperation;
 use diffy::patchset::ParseMode;
 use diffy::patchset::PatchSet;
+
+/// Strip the first `n` path components from a path.
+fn strip_path_prefix(path: &str, n: usize) -> String {
+    let mut remaining = path;
+    for _ in 0..n {
+        match remaining.split_once('/') {
+            Some((_first, rest)) => remaining = rest,
+            None => return remaining.to_owned(),
+        }
+    }
+    remaining.to_owned()
+}
 
 /// Result of processing a single commit pair.
 struct CommitResult {
@@ -233,29 +248,38 @@ fn process_commit(
     }
 
     for file_patch in patchset.iter() {
-        let operation = file_patch.operation().strip_prefix(1);
+        // Paths from ---/+++ headers have a/b prefixes that need stripping.
+        // Paths from git extended headers (rename/copy) are already clean.
+        let operation = file_patch.operation();
 
-        let (base_content, expected_content, desc) = match &operation {
+        let (base_content, expected_content, desc) = match operation {
             FileOperation::Create(path) => {
-                let Some(expected) = file_at_commit(repo, child, path) else {
+                // Create paths come from +++ header, strip a/b prefix
+                let path = strip_path_prefix(path, 1);
+                let Some(expected) = file_at_commit(repo, child, &path) else {
                     skipped += 1;
                     continue;
                 };
                 (String::new(), expected, format!("create {path}"))
             }
             FileOperation::Delete(path) => {
-                let Some(base) = file_at_commit(repo, parent, path) else {
+                // Delete paths come from --- header, strip a/b prefix
+                let path = strip_path_prefix(path, 1);
+                let Some(base) = file_at_commit(repo, parent, &path) else {
                     skipped += 1;
                     continue;
                 };
                 (base, String::new(), format!("delete {path}"))
             }
             FileOperation::Modify { original, modified } => {
-                let Some(base) = file_at_commit(repo, parent, original) else {
+                // Modify paths come from ---/+++ headers, strip a/b prefix
+                let original = strip_path_prefix(original, 1);
+                let modified = strip_path_prefix(modified, 1);
+                let Some(base) = file_at_commit(repo, parent, &original) else {
                     skipped += 1;
                     continue;
                 };
-                let Some(expected) = file_at_commit(repo, child, modified) else {
+                let Some(expected) = file_at_commit(repo, child, &modified) else {
                     skipped += 1;
                     continue;
                 };
@@ -266,6 +290,7 @@ fn process_commit(
                 };
                 (base, expected, desc)
             }
+            // Rename/Copy paths come from git headers WITHOUT a/b prefix
             FileOperation::Rename { from, to } => {
                 let Some(base) = file_at_commit(repo, parent, from) else {
                     skipped += 1;
