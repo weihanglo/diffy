@@ -3,7 +3,7 @@
 //! ## Usage
 //!
 //! ```console
-//! $ cargo test --test git_history_replay -- --nocapture
+//! $ cargo test --test replay -- --nocapture
 //! ```
 //!
 //! ## Environment Variables
@@ -326,7 +326,7 @@ fn process_commit(
 }
 
 #[test]
-fn test_git_history_replay() {
+fn test_replay() {
     let repo = repo_path();
     let max = max_commits();
     let mode = parse_mode();

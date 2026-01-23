@@ -23,7 +23,7 @@ name = "patch_formatter"
 required-features = ["color"]
 
 [[test]]
-name = "git_history_replay"
+name = "replay"
 test = false
 
 [dev-dependencies]

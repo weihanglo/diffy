@@ -85,7 +85,7 @@ jobs:
       - if: matrix.clone
         run: git clone ${{ matrix.clone }} ${{ matrix.repo }}
       - run: rustup toolchain install stable --profile minimal
-      - run: cargo test --release --test git_history_replay -- --nocapture
+      - run: cargo test --release --test replay -- --nocapture
         env:
           DIFFY_TEST_REPO: ${{ matrix.repo }}
           DIFFY_TEST_COMMITS: ${{ matrix.commits }}
