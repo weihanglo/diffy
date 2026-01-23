@@ -135,7 +135,7 @@ fn apply_gnu_patch(in_dir: &Path, patch_path: &Path, output_dir: &Path) -> Resul
 }
 
 /// Run a patch behavior test case.
-fn run_case(case_dir: &Path) -> Result<(), DiffyError> {
+fn run_case_impl(case_dir: &Path, force_skip_gnu_check: bool) -> Result<(), DiffyError> {
     let in_dir = case_dir.join("in");
     let patch_path = in_dir.join("foo.patch");
 
@@ -160,8 +160,8 @@ fn run_case(case_dir: &Path) -> Result<(), DiffyError> {
     // Apply with diffy
     let diffy_result = apply_diffy(&in_dir, &patch_path, &diffy_output);
 
-    // In CI mode, also verify GNU patch behavior matches
-    if is_ci() {
+    // In CI mode, also verify GNU patch behavior matches (unless explicitly skipped)
+    if is_ci() && !force_skip_gnu_check {
         print_patch_version();
         let gnu_result = apply_gnu_patch(&in_dir, &patch_path, &gnu_output);
 
@@ -181,6 +181,16 @@ fn run_case(case_dir: &Path) -> Result<(), DiffyError> {
     snapbox::assert_subset_eq(case_dir.join("out"), &diffy_output);
 
     Ok(())
+}
+
+/// Run a patch test case, comparing with GNU patch.
+fn run_case(case_dir: &Path) -> Result<(), DiffyError> {
+    run_case_impl(case_dir, false)
+}
+
+/// Run a patch test case for diffy only, skipping GNU patch comparison.
+fn run_case_diffy_only(case_dir: &Path) -> Result<(), DiffyError> {
+    run_case_impl(case_dir, true)
 }
 
 fn case_dir(name: &str) -> PathBuf {
@@ -237,6 +247,31 @@ fn missing_minus_header() {
     run_case(&case_dir("missing_minus_header")).unwrap();
 }
 
+// Empty file creation using unified diff format with empty hunk.
+//
+// Platform compatibility:
+// - Apple patch 2.0 (macOS/BSD): ✅ Accepts, creates empty file (0 bytes)
+// - GNU patch 2.8 (Linux): ❌ Rejects as "malformed patch at line 3"
+// - diffy: ✅ Accepts (with our current implementation)
+#[test]
+#[ignore = "implementation differences"]
+fn create_empty_file_unidiff() {
+    run_case(&case_dir("create_empty_file_unidiff")).unwrap();
+}
+
+// Empty file creation using git diff format (no unified diff headers/hunks).
+//
+// Platform compatibility:
+//
+// - GNU patch 2.8 (Linux): ✅ Accepts with `-p1`, creates empty file (0 bytes)
+// - Apple patch 2.0 (macOS/BSD): ❌ Rejects ("can't find patch")
+// - diffy: ❌ UniDiff mode doesn't support for empty files
+#[test]
+#[ignore = "implementation differences"]
+fn create_empty_file_gitdiff() {
+    run_case(&case_dir("create_empty_file_gitdiff")).unwrap();
+}
+
 #[test]
 fn delete_file() {
     run_case(&case_dir("delete_file")).unwrap();
@@ -265,4 +300,19 @@ fn fail_hunk_not_found() {
 #[test]
 fn fail_truncated_file() {
     run_case(&case_dir("fail_truncated_file")).unwrap_err();
+}
+
+// Patches with headers but no hunks.
+//
+//
+// Platform compatibility:
+//
+// - GNU patch 2.8 (Linux): ❌ Rejects with "Only garbage was found in the patch input"
+// - Apple patch 2.0 (macOS/BSD): ❌ Rejects with "I can't seem to find a patch in there anywhere"
+// - diffy: ✅ Accepts and parses (0 hunks)
+//
+// diffy's permissiveness is needed for GitDiff mode support where empty files have no hunks
+#[test]
+fn fail_no_hunk() {
+    run_case_diffy_only(&case_dir("fail_no_hunk")).unwrap();
 }
