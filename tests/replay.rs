@@ -3,7 +3,7 @@
 //! ## Usage
 //!
 //! ```console
-//! $ cargo test --test git_history_replay -- --nocapture
+//! $ cargo test --test replay -- --nocapture
 //! ```
 //!
 //! ## Environment Variables
@@ -198,16 +198,30 @@ fn process_commit(
 
     // Verify we parsed the same number of patches as git reports files changed.
     // This catches cases where patches are silently skipped.
-    let expected_file_count = match mode {
-        ParseMode::UniDiff => git(
-            repo,
-            &["diff", "--name-status", "--no-renames", parent, child],
-        ),
-        ParseMode::GitDiff => git(repo, &["diff", "--name-status", parent, child]),
-    }
-    .lines()
-    .filter(|l| !l.is_empty())
-    .count();
+    let expected_file_count = if mode == ParseMode::UniDiff {
+        // In UniDiff mode,
+        //
+        // we need to filter out empty file changes,
+        // because they have no hunks and no ---/+++ headers
+        // and is not really a valid unidiff format (though diffy accepts them)
+        //
+        // Funny enough, we added an empty file in 51944073b5f813ef4,
+        // (tests/compat/gnu_patch/delete_file/out/file.txt)
+        // and it captured UniDiff mode not supporting empty files git headers.
+        let numstat_output = git(repo, &["diff", "--numstat", "--no-renames", parent, child]);
+        numstat_output
+            .lines()
+            .filter(|l| !l.is_empty())
+            .filter(|line| {
+                // `--numstat` format: `added\tdeleted\tpath` or `-\t-\tpath` for binary
+                // Empty files show as "0\t0\tpath"
+                !line.starts_with("0\t0\t")
+            })
+            .count()
+    } else {
+        let name_status_output = git(repo, &["diff", "--name-status", parent, child]);
+        name_status_output.lines().filter(|l| !l.is_empty()).count()
+    };
 
     if patchset.len() != expected_file_count {
         let n = patchset.len();
@@ -312,7 +326,7 @@ fn process_commit(
 }
 
 #[test]
-fn test_git_history_replay() {
+fn test_replay() {
     let repo = repo_path();
     let max = max_commits();
     let mode = parse_mode();
