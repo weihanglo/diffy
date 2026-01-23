@@ -128,7 +128,6 @@ fn is_unidiff_boundary(prev: Option<&str>, line: &str, next: Option<&str>) -> bo
 /// Strips email preamble (headers and commit message) from `git format-patch` output.
 ///
 /// Returns the content after the first `\n---\n` separator.
-/// If no separator is found, returns the entire input.
 ///
 /// ## Observed git behavior
 ///
@@ -140,12 +139,12 @@ fn is_unidiff_boundary(prev: Option<&str>, line: &str, next: Option<&str>) -> bo
 ///
 /// > The log message and the patch are separated by a line with a three-dash line.
 ///
-/// [`git format-patch`]: https://git-scm.com/docs/git-format-patch>:
+/// [`git format-patch`]: https://git-scm.com/docs/git-format-patch
 fn strip_email_preamble(input: &str) -> &str {
-    input
-        .split_once(EMAIL_PREAMBLE_SEPARATOR)
-        .map(|(_, after)| after)
-        .unwrap_or(input)
+    match input.find(EMAIL_PREAMBLE_SEPARATOR) {
+        Some(pos) => &input[pos + EMAIL_PREAMBLE_SEPARATOR.len()..],
+        None => input,
+    }
 }
 
 /// Strips trailing email signature (RFC 3676).
