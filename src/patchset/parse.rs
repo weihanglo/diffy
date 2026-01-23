@@ -12,44 +12,36 @@ const HUNK_PREFIX: &str = "@@ ";
 /// Path used to indicate file creation or deletion.
 const DEV_NULL: &str = "/dev/null";
 
-/// Prefix for git diff header (e.g., `diff --git a/file b/file`).
-const GIT_DIFF_PREFIX: &str = "diff --git ";
-
 /// Separator between commit message and patch in git format-patch output.
 const EMAIL_PREAMBLE_SEPARATOR: &str = "\n---\n";
 
 /// Parse a multi-file patch.
-///
-/// This strips:
-///
-/// * email preamble (headers and commit message before `---` separator)
-/// * trailing email signature
 pub fn parse(input: &str, mode: ParseMode) -> Result<PatchSet<'_, str>, ParsePatchError> {
     // Email signatures would be parsed as a delete line and corrupt the hunk.
     // Must strip before parsing.
     let input = strip_email_signature(input);
 
-    // In GitDiff mode, strip email preamble to avoid false `diff --git` matches
-    // in commit messages.
-    let input = match mode {
-        ParseMode::GitDiff => strip_email_preamble(input),
-        ParseMode::UniDiff => input,
-    };
+    match mode {
+        ParseMode::GitDiff => parse_unidiff(strip_email_preamble(input)),
+        ParseMode::UniDiff => parse_unidiff(input),
+    }
+}
 
-    let patch_strs = split_patches(input, mode);
+fn parse_unidiff(input: &str) -> Result<PatchSet<'_, str>, ParsePatchError> {
+    let patch_strs = split_patches_unidiff(input);
 
     let mut patches = Vec::with_capacity(patch_strs.len());
     for patch_str in patch_strs {
         let patch = Patch::from_str(patch_str)?;
-        let operation = extract_file_operation(patch.original(), patch.modified())?;
+        let operation = extract_file_op_unidiff(patch.original(), patch.modified())?;
         patches.push(FilePatch::new(operation, patch));
     }
 
     Ok(PatchSet::new(patches))
 }
 
-/// Splits a unified diff containing multiple file patches.
-pub fn split_patches(content: &str, mode: ParseMode) -> Vec<&str> {
+/// Splits a unified diff containing multiple file patches (UniDiff mode).
+pub(crate) fn split_patches_unidiff(content: &str) -> Vec<&str> {
     let mut patches = Vec::new();
     let mut patch_start = None::<usize>;
     let mut prev_line = None::<&str>;
@@ -60,7 +52,7 @@ pub fn split_patches(content: &str, mode: ParseMode) -> Vec<&str> {
     while let Some(line) = lines.next() {
         let next_line = lines.peek().copied();
 
-        if is_patch_boundary(prev_line, line, next_line, mode) {
+        if is_unidiff_boundary(prev_line, line, next_line) {
             if let Some(start) = patch_start {
                 patches.push(&content[start..byte_offset]);
             }
@@ -84,19 +76,11 @@ pub fn split_patches(content: &str, mode: ParseMode) -> Vec<&str> {
     patches
 }
 
-/// Checks if the current line is a patch boundary.
-fn is_patch_boundary(prev: Option<&str>, line: &str, next: Option<&str>, mode: ParseMode) -> bool {
-    match mode {
-        ParseMode::GitDiff => is_gitdiff_boundary(line),
-        ParseMode::UniDiff => is_unidiff_boundary(prev, line, next),
-    }
-}
-
 /// Checks if the current line is a patch boundary in GitDiff mode.
 ///
 /// Only `diff --git ` is recognized as a boundary.
 fn is_gitdiff_boundary(line: &str) -> bool {
-    line.starts_with(GIT_DIFF_PREFIX)
+    line.starts_with("diff --git ")
 }
 
 /// Checks if the current line is a patch boundary in UniDiff mode.
@@ -184,7 +168,7 @@ fn strip_email_signature(input: &str) -> &str {
 }
 
 /// Extracts the file operation from a patch based on its header paths.
-pub fn extract_file_operation(
+pub fn extract_file_op_unidiff(
     original: Option<&str>,
     modified: Option<&str>,
 ) -> Result<FileOperation, ParsePatchError> {
