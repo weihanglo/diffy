@@ -175,10 +175,12 @@ fn strip_email_preamble(input: &str) -> &str {
 /// If the input has CRLF line endings (e.g., from email transport),
 /// the caller must normalize to LF before parsing.
 fn strip_email_signature(input: &str) -> &str {
-    input
-        .rsplit_once("\n-- \n")
-        .map(|(body, _sig)| body)
-        .unwrap_or(input)
+    if let Some(pos) = input.rfind("\n-- \n") {
+        // Keep content up to and including the newline before "-- "
+        &input[..pos + 1]
+    } else {
+        input
+    }
 }
 
 /// Extracts the file operation from a patch based on its header paths.
