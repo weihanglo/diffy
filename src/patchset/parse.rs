@@ -58,7 +58,7 @@ fn parse_unidiff(input: &str) -> Result<PatchSet<'_, str>, ParsePatchError> {
 /// Splits a git diff containing multiple file patches (GitDiff mode).
 ///
 /// Content should be email preamble stripped.
-pub(crate) fn split_patches_gitdiff(content: &str) -> Vec<GitDiff<'_>> {
+fn split_patches_gitdiff(content: &str) -> Vec<GitDiff<'_>> {
     let mut patches = Vec::new();
     let mut patch_start = None::<usize>;
     let mut header_end = None::<usize>; // byte offset where `---` was found
@@ -296,13 +296,13 @@ fn extract_file_op_gitdiff(
 
 /// A single file's patch split into header and unified diff sections.
 #[derive(Debug)]
-pub(crate) struct GitDiff<'a> {
+struct GitDiff<'a> {
     /// Lines between `diff --git` and `---` (extended header).
-    pub header: &'a str,
+    header: &'a str,
     /// The unified diff content (`---`/`+++` and hunks).
     ///
     /// For pure renames/mode-only changes, this is empty.
-    pub patch: &'a str,
+    patch: &'a str,
 }
 
 impl<'a> GitDiff<'a> {
@@ -338,18 +338,18 @@ impl<'a> GitDiff<'a> {
 /// Extracted from lines between `diff --git` and `---` (or end of patch).
 /// See [git-diff format documentation](https://git-scm.com/docs/diff-format).
 #[derive(Debug, Default, PartialEq, Eq)]
-pub(crate) struct GitHeader<'a> {
-    pub(crate) rename_from: Option<&'a str>,
-    pub(crate) rename_to: Option<&'a str>,
-    pub(crate) copy_from: Option<&'a str>,
-    pub(crate) copy_to: Option<&'a str>,
+struct GitHeader<'a> {
+    rename_from: Option<&'a str>,
+    rename_to: Option<&'a str>,
+    copy_from: Option<&'a str>,
+    copy_to: Option<&'a str>,
 }
 
 impl<'a> GitHeader<'a> {
     /// Parses git extended header metadata from a pre-split header string.
     ///
     /// Returns `None` if no recognizable git headers are found.
-    pub(crate) fn parse(header_str: &'a str) -> Option<Self> {
+    fn parse(header_str: &'a str) -> Option<Self> {
         let mut header = GitHeader::default();
         let mut found_any = false;
 

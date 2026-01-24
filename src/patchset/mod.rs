@@ -84,7 +84,7 @@ impl<'a> PatchSet<'a, str> {
 }
 
 impl<'a, T: ToOwned + ?Sized> PatchSet<'a, T> {
-    pub(crate) fn new(patches: Vec<FilePatch<'a, T>>) -> Self {
+    fn new(patches: Vec<FilePatch<'a, T>>) -> Self {
         Self { patches }
     }
 
@@ -152,7 +152,7 @@ where
 }
 
 impl<'a, T: ToOwned + ?Sized> FilePatch<'a, T> {
-    pub(crate) fn new(operation: FileOperation, patch: Patch<'a, T>) -> Self {
+    fn new(operation: FileOperation, patch: Patch<'a, T>) -> Self {
         Self { operation, patch }
     }
 
