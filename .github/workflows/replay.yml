@@ -1,0 +1,52 @@
+name: Replay
+
+on:
+  workflow_call:
+    inputs:
+      repo_url:
+        description: 'Git repository URL to clone and test against'
+        required: false
+        default: ''
+        type: string
+      commits:
+        description: 'Number of commits to replay'
+        required: true
+        type: string
+
+  workflow_dispatch:
+    inputs:
+      repo_url:
+        description: 'Git repository URL to clone and test against'
+        required: true
+        default: ''
+        type: string
+      commits:
+        description: 'Number of commits to replay'
+        required: true
+        default: '200'
+        type: string
+
+env:
+  CARGO_INCREMENTAL: 0
+  CI: "1"
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        parse_mode: [unidiff, gitdiff]
+    name: ${{ matrix.parse_mode }}
+    continue-on-error: ${{ matrix.parse_mode == 'gitdiff' }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: ${{ inputs.repo_url && 1 || 0 }}
+      - if: inputs.repo_url != ''
+        run: git clone ${{ inputs.repo_url }} --depth $(( ${{ inputs.commits }} + 1 )) target/test-repo
+      - run: rustup toolchain install stable --profile minimal
+      - run: cargo test --release --test replay -- --nocapture
+        env:
+          DIFFY_TEST_REPO: ${{ inputs.repo_url == '' && '.' || 'target/test-repo' }}
+          DIFFY_TEST_COMMITS: ${{ inputs.commits }}
+          DIFFY_TEST_PARSE_MODE: ${{ matrix.parse_mode }}
