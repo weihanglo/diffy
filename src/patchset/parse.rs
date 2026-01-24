@@ -12,44 +12,90 @@ const HUNK_PREFIX: &str = "@@ ";
 /// Path used to indicate file creation or deletion.
 const DEV_NULL: &str = "/dev/null";
 
-/// Prefix for git diff header (e.g., `diff --git a/file b/file`).
-const GIT_DIFF_PREFIX: &str = "diff --git ";
-
 /// Separator between commit message and patch in git format-patch output.
 const EMAIL_PREAMBLE_SEPARATOR: &str = "\n---\n";
 
 /// Parse a multi-file patch.
-///
-/// This strips:
-///
-/// * email preamble (headers and commit message before `---` separator)
-/// * trailing email signature
 pub fn parse(input: &str, mode: ParseMode) -> Result<PatchSet<'_, str>, ParsePatchError> {
     // Email signatures would be parsed as a delete line and corrupt the hunk.
     // Must strip before parsing.
     let input = strip_email_signature(input);
 
-    // In GitDiff mode, strip email preamble to avoid false `diff --git` matches
-    // in commit messages.
-    let input = match mode {
-        ParseMode::GitDiff => strip_email_preamble(input),
-        ParseMode::UniDiff => input,
-    };
+    match mode {
+        ParseMode::GitDiff => parse_gitdiff(input),
+        ParseMode::UniDiff => parse_unidiff(input),
+    }
+}
 
-    let patch_strs = split_patches(input, mode);
+fn parse_gitdiff(input: &str) -> Result<PatchSet<'_, str>, ParsePatchError> {
+    // Strip email preamble to avoid false `diff --git` matches in commit messages.
+    let input = strip_email_preamble(input);
 
-    let mut patches = Vec::with_capacity(patch_strs.len());
-    for patch_str in patch_strs {
-        let patch = Patch::from_str(patch_str)?;
-        let operation = extract_file_operation(patch.original(), patch.modified())?;
+    let mut patches = Vec::new();
+    for raw in split_patches_gitdiff(input) {
+        let header = GitHeader::parse(raw.header);
+        let patch = Patch::from_str(raw.patch)?;
+        let operation = extract_file_op_gitdiff(header.as_ref(), &patch)?;
         patches.push(FilePatch::new(operation, patch));
     }
 
     Ok(PatchSet::new(patches))
 }
 
-/// Splits a unified diff containing multiple file patches.
-pub fn split_patches(content: &str, mode: ParseMode) -> Vec<&str> {
+fn parse_unidiff(input: &str) -> Result<PatchSet<'_, str>, ParsePatchError> {
+    let patch_strs = split_patches_unidiff(input);
+
+    let mut patches = Vec::with_capacity(patch_strs.len());
+    for patch_str in patch_strs {
+        let patch = Patch::from_str(patch_str)?;
+        let operation = extract_file_op_unidiff(patch.original(), patch.modified())?;
+        patches.push(FilePatch::new(operation, patch));
+    }
+
+    Ok(PatchSet::new(patches))
+}
+
+/// Splits a git diff containing multiple file patches (GitDiff mode).
+///
+/// Content should be email preamble stripped.
+pub(crate) fn split_patches_gitdiff(content: &str) -> Vec<GitDiff<'_>> {
+    let mut patches = Vec::new();
+    let mut patch_start = None::<usize>;
+    let mut header_end = None::<usize>; // byte offset where `---` was found
+    let mut byte_offset = 0;
+
+    for line in content.lines() {
+        if is_gitdiff_boundary(line) {
+            if let Some(start) = patch_start {
+                patches.push(GitDiff::new(content, start, byte_offset, header_end));
+            }
+            patch_start = Some(byte_offset);
+            header_end = None;
+        } else if line.starts_with(ORIGINAL_PREFIX) && header_end.is_none() {
+            // First `---` after `diff --git` marks end of extended header
+            // Assumption: `git format-patch` always has `---` when starting patch
+            // TODO: add compat tests check whether git may produce other prefix.
+            header_end = Some(byte_offset);
+        }
+
+        byte_offset += line.len();
+
+        if content[byte_offset..].starts_with("\r\n") {
+            byte_offset += 2;
+        } else if content[byte_offset..].starts_with('\n') {
+            byte_offset += 1;
+        }
+    }
+
+    if let Some(start) = patch_start {
+        patches.push(GitDiff::new(content, start, content.len(), header_end));
+    }
+
+    patches
+}
+
+/// Splits a unified diff containing multiple file patches (UniDiff mode).
+pub(crate) fn split_patches_unidiff(content: &str) -> Vec<&str> {
     let mut patches = Vec::new();
     let mut patch_start = None::<usize>;
     let mut prev_line = None::<&str>;
@@ -60,7 +106,7 @@ pub fn split_patches(content: &str, mode: ParseMode) -> Vec<&str> {
     while let Some(line) = lines.next() {
         let next_line = lines.peek().copied();
 
-        if is_patch_boundary(prev_line, line, next_line, mode) {
+        if is_unidiff_boundary(prev_line, line, next_line) {
             if let Some(start) = patch_start {
                 patches.push(&content[start..byte_offset]);
             }
@@ -84,19 +130,12 @@ pub fn split_patches(content: &str, mode: ParseMode) -> Vec<&str> {
     patches
 }
 
-/// Checks if the current line is a patch boundary.
-fn is_patch_boundary(prev: Option<&str>, line: &str, next: Option<&str>, mode: ParseMode) -> bool {
-    match mode {
-        ParseMode::GitDiff => is_gitdiff_boundary(line),
-        ParseMode::UniDiff => is_unidiff_boundary(prev, line, next),
-    }
-}
-
 /// Checks if the current line is a patch boundary in GitDiff mode.
 ///
 /// Only `diff --git ` is recognized as a boundary.
 fn is_gitdiff_boundary(line: &str) -> bool {
-    line.starts_with(GIT_DIFF_PREFIX)
+    // TODO: add compat tests verifying this matches how git works
+    line.starts_with("diff --git ")
 }
 
 /// Checks if the current line is a patch boundary in UniDiff mode.
@@ -144,7 +183,6 @@ fn is_unidiff_boundary(prev: Option<&str>, line: &str, next: Option<&str>) -> bo
 /// Strips email preamble (headers and commit message) from `git format-patch` output.
 ///
 /// Returns the content after the first `\n---\n` separator.
-/// If no separator is found, returns the entire input.
 ///
 /// ## Observed git behavior
 ///
@@ -156,12 +194,12 @@ fn is_unidiff_boundary(prev: Option<&str>, line: &str, next: Option<&str>) -> bo
 ///
 /// > The log message and the patch are separated by a line with a three-dash line.
 ///
-/// [`git format-patch`]: https://git-scm.com/docs/git-format-patch>:
+/// [`git format-patch`]: https://git-scm.com/docs/git-format-patch
 fn strip_email_preamble(input: &str) -> &str {
-    input
-        .split_once(EMAIL_PREAMBLE_SEPARATOR)
-        .map(|(_, after)| after)
-        .unwrap_or(input)
+    match input.find(EMAIL_PREAMBLE_SEPARATOR) {
+        Some(pos) => &input[pos + EMAIL_PREAMBLE_SEPARATOR.len()..],
+        None => input,
+    }
 }
 
 /// Strips trailing email signature (RFC 3676).
@@ -184,7 +222,7 @@ fn strip_email_signature(input: &str) -> &str {
 }
 
 /// Extracts the file operation from a patch based on its header paths.
-pub fn extract_file_operation(
+pub fn extract_file_op_unidiff(
     original: Option<&str>,
     modified: Option<&str>,
 ) -> Result<FileOperation, ParsePatchError> {
@@ -228,5 +266,110 @@ pub fn extract_file_operation(
             }
             (None, None) => Err(ParsePatchError::new("patch has no file path")),
         }
+    }
+}
+
+/// Determines the file operation using git headers (if available) and patch paths.
+fn extract_file_op_gitdiff(
+    header: Option<&GitHeader<'_>>,
+    patch: &Patch<'_, str>,
+) -> Result<FileOperation, ParsePatchError> {
+    // Git headers are authoritative for rename/copy
+    if let Some(h) = header {
+        if let (Some(from), Some(to)) = (h.rename_from, h.rename_to) {
+            return Ok(FileOperation::Rename {
+                from: from.to_owned(),
+                to: to.to_owned(),
+            });
+        }
+        if let (Some(from), Some(to)) = (h.copy_from, h.copy_to) {
+            return Ok(FileOperation::Copy {
+                from: from.to_owned(),
+                to: to.to_owned(),
+            });
+        }
+    }
+
+    // Fall back to ---/+++ paths
+    extract_file_op_unidiff(patch.original(), patch.modified())
+}
+
+/// A single file's patch split into header and unified diff sections.
+#[derive(Debug)]
+pub(crate) struct GitDiff<'a> {
+    /// Lines between `diff --git` and `---` (extended header).
+    pub header: &'a str,
+    /// The unified diff content (`---`/`+++` and hunks).
+    ///
+    /// For pure renames/mode-only changes, this is empty.
+    pub patch: &'a str,
+}
+
+impl<'a> GitDiff<'a> {
+    /// Creates a GitDiff from a content slice and byte offsets.
+    fn new(
+        content: &'a str,
+        patch_start: usize,
+        patch_end: usize,
+        header_end: Option<usize>,
+    ) -> Self {
+        let patch = &content[patch_start..patch_end];
+        match header_end {
+            Some(end) => {
+                let header_len = end - patch_start;
+                GitDiff {
+                    header: &patch[..header_len],
+                    patch: &patch[header_len..],
+                }
+            }
+            None => {
+                // No `---` found: pure rename/mode-change/binary — all header
+                GitDiff {
+                    header: patch,
+                    patch: "",
+                }
+            }
+        }
+    }
+}
+
+/// Git extended header metadata.
+///
+/// Extracted from lines between `diff --git` and `---` (or end of patch).
+/// See [git-diff format documentation](https://git-scm.com/docs/diff-format).
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct GitHeader<'a> {
+    pub(crate) rename_from: Option<&'a str>,
+    pub(crate) rename_to: Option<&'a str>,
+    pub(crate) copy_from: Option<&'a str>,
+    pub(crate) copy_to: Option<&'a str>,
+}
+
+impl<'a> GitHeader<'a> {
+    /// Parses git extended header metadata from a pre-split header string.
+    ///
+    /// Returns `None` if no recognizable git headers are found.
+    pub(crate) fn parse(header_str: &'a str) -> Option<Self> {
+        let mut header = GitHeader::default();
+        let mut found_any = false;
+
+        for line in header_str.lines() {
+            if let Some(path) = line.strip_prefix("rename from ") {
+                header.rename_from = Some(path);
+                found_any = true;
+            } else if let Some(path) = line.strip_prefix("rename to ") {
+                header.rename_to = Some(path);
+                found_any = true;
+            } else if let Some(path) = line.strip_prefix("copy from ") {
+                header.copy_from = Some(path);
+                found_any = true;
+            } else if let Some(path) = line.strip_prefix("copy to ") {
+                header.copy_to = Some(path);
+                found_any = true;
+            }
+            // TODO: old mode, new mode, similarity index, dissimilarity index, index <hash>..<hash>
+        }
+
+        found_any.then_some(header)
     }
 }

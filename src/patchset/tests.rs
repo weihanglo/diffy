@@ -1,7 +1,10 @@
 //! Tests for patchset parsing.
 
-use super::parse::{extract_file_operation, split_patches};
-use super::{FileOperation, ParseMode, PatchSet};
+use super::parse::extract_file_op_unidiff;
+use super::parse::split_patches_unidiff;
+use super::FileOperation;
+use super::ParseMode;
+use super::PatchSet;
 use crate::Patch;
 
 mod file_operation {
@@ -45,7 +48,7 @@ mod split_patches {
 +line3
  line4
 ";
-        let patches = split_patches(content, ParseMode::UniDiff);
+        let patches = split_patches_unidiff(content);
         assert_eq!(patches.len(), 1);
         assert!(Patch::from_str(patches[0]).is_ok());
     }
@@ -64,7 +67,7 @@ mod split_patches {
 -old2
 +new2
 ";
-        let patches = split_patches(content, ParseMode::UniDiff);
+        let patches = split_patches_unidiff(content);
         assert_eq!(patches.len(), 2);
         assert!(Patch::from_str(patches[0]).is_ok());
         assert!(Patch::from_str(patches[1]).is_ok());
@@ -81,7 +84,7 @@ It should be ignored
 -old
 +new
 ";
-        let patches = split_patches(content, ParseMode::UniDiff);
+        let patches = split_patches_unidiff(content);
         assert_eq!(patches.len(), 1);
         assert!(Patch::from_str(patches[0]).is_ok());
     }
@@ -98,14 +101,14 @@ It should be ignored
 +--- this line starts with dashes
  line3
 ";
-        let patches = split_patches(content, ParseMode::UniDiff);
+        let patches = split_patches_unidiff(content);
         assert_eq!(patches.len(), 1);
         assert!(Patch::from_str(patches[0]).is_ok());
     }
 
     #[test]
     fn split_empty_content() {
-        let patches = split_patches("", ParseMode::UniDiff);
+        let patches = split_patches_unidiff("");
         assert!(patches.is_empty());
     }
 
@@ -146,7 +149,7 @@ In a hole in the ground there lived a hobbit
     #[test]
     fn not_a_patch() {
         let content = "Some random text\nNo patches here\n";
-        let patches = split_patches(content, ParseMode::UniDiff);
+        let patches = split_patches_unidiff(content);
         assert!(patches.is_empty());
     }
 
@@ -158,7 +161,7 @@ In a hole in the ground there lived a hobbit
 Some random text
 No patches here
 ";
-        let patches = split_patches(content, ParseMode::UniDiff);
+        let patches = split_patches_unidiff(content);
         assert!(patches.is_empty());
     }
 
@@ -170,7 +173,7 @@ No patches here
 -old
 +new
 ";
-        let patches = split_patches(content, ParseMode::UniDiff);
+        let patches = split_patches_unidiff(content);
         assert_eq!(patches.len(), 1);
         assert!(Patch::from_str(patches[0]).is_ok());
     }
@@ -183,7 +186,7 @@ No patches here
 -old
 +new
 ";
-        let patches = split_patches(content, ParseMode::UniDiff);
+        let patches = split_patches_unidiff(content);
         assert_eq!(patches.len(), 1);
         assert!(Patch::from_str(patches[0]).is_ok());
     }
@@ -197,7 +200,7 @@ No patches here
 -old
 +new
 ";
-        let patches = split_patches(content, ParseMode::UniDiff);
+        let patches = split_patches_unidiff(content);
         assert_eq!(patches.len(), 1);
         assert!(Patch::from_str(patches[0]).is_ok());
     }
@@ -219,20 +222,44 @@ No patches here
 -old3
 +new3
 ";
-        let patches = split_patches(content, ParseMode::UniDiff);
+        let patches = split_patches_unidiff(content);
         assert_eq!(patches.len(), 3);
         assert!(Patch::from_str(patches[0]).is_ok());
         assert!(Patch::from_str(patches[1]).is_ok());
         assert!(Patch::from_str(patches[2]).is_ok());
     }
+
+    #[test]
+    fn diff_git_not_boundary_in_unidiff_mode() {
+        // In UniDiff mode, `diff --git` is just noise before the real `---` boundary
+        let content = "\
+diff --git a/file1.rs b/file1.rs
+--- a/file1.rs
++++ b/file1.rs
+@@ -1 +1 @@
+-old1
++new1
+diff --git a/file2.rs b/file2.rs
+--- a/file2.rs
++++ b/file2.rs
+@@ -1 +1 @@
+-old2
++new2
+";
+        let patches = split_patches_unidiff(content);
+        assert_eq!(patches.len(), 2);
+        // Both should parse, the `diff --git` lines are just garbage before `---`
+        assert!(Patch::from_str(patches[0]).is_ok());
+        assert!(Patch::from_str(patches[1]).is_ok());
+    }
 }
 
-mod extract_file_operation {
+mod extract_file_op_unidiff {
     use super::*;
 
     #[test]
     fn modify() {
-        let op = extract_file_operation(Some("a/src/lib.rs"), Some("b/src/lib.rs")).unwrap();
+        let op = extract_file_op_unidiff(Some("a/src/lib.rs"), Some("b/src/lib.rs")).unwrap();
         assert_eq!(
             op,
             FileOperation::Modify {
@@ -244,19 +271,19 @@ mod extract_file_operation {
 
     #[test]
     fn new_file() {
-        let op = extract_file_operation(Some("/dev/null"), Some("b/src/lib.rs")).unwrap();
+        let op = extract_file_op_unidiff(Some("/dev/null"), Some("b/src/lib.rs")).unwrap();
         assert_eq!(op, FileOperation::Create("b/src/lib.rs".to_owned()));
     }
 
     #[test]
     fn delete_file() {
-        let op = extract_file_operation(Some("a/src/lib.rs"), Some("/dev/null")).unwrap();
+        let op = extract_file_op_unidiff(Some("a/src/lib.rs"), Some("/dev/null")).unwrap();
         assert_eq!(op, FileOperation::Delete("a/src/lib.rs".to_owned()));
     }
 
     #[test]
     fn different_paths() {
-        let op = extract_file_operation(Some("a/old_name.rs"), Some("b/new_name.rs")).unwrap();
+        let op = extract_file_op_unidiff(Some("a/old_name.rs"), Some("b/new_name.rs")).unwrap();
         assert_eq!(
             op,
             FileOperation::Modify {
@@ -268,7 +295,7 @@ mod extract_file_operation {
 
     #[test]
     fn missing_modified_uses_original() {
-        let op = extract_file_operation(Some("a/src/lib.rs"), None).unwrap();
+        let op = extract_file_op_unidiff(Some("a/src/lib.rs"), None).unwrap();
         assert_eq!(
             op,
             FileOperation::Modify {
@@ -280,7 +307,7 @@ mod extract_file_operation {
 
     #[test]
     fn missing_original_uses_modified() {
-        let op = extract_file_operation(None, Some("b/src/lib.rs")).unwrap();
+        let op = extract_file_op_unidiff(None, Some("b/src/lib.rs")).unwrap();
         assert_eq!(
             op,
             FileOperation::Modify {
@@ -292,22 +319,22 @@ mod extract_file_operation {
 
     #[test]
     fn both_dev_null_errors() {
-        let result = extract_file_operation(Some("/dev/null"), Some("/dev/null"));
+        let result = extract_file_op_unidiff(Some("/dev/null"), Some("/dev/null"));
         assert!(result.is_err());
     }
 
     #[test]
     fn missing_both_paths_errors() {
-        let result = extract_file_operation(None, None);
+        let result = extract_file_op_unidiff(None, None);
         assert!(result.is_err());
     }
 }
 
-mod git_diff_boundary {
+mod patchset_gitdiff {
     use super::*;
 
     #[test]
-    fn diff_git_is_boundary_in_gitdiff_mode() {
+    fn multi_file_patch() {
         let content = "\
 diff --git a/file1.rs b/file1.rs
 --- a/file1.rs
@@ -322,39 +349,30 @@ diff --git a/file2.rs b/file2.rs
 -old2
 +new2
 ";
-        let patches = split_patches(content, ParseMode::GitDiff);
-        assert_eq!(patches.len(), 2);
-        assert!(Patch::from_str(patches[0]).is_ok());
-        assert!(Patch::from_str(patches[1]).is_ok());
+        let patchset = PatchSet::parse(content, ParseMode::GitDiff).unwrap();
+        assert_eq!(patchset.len(), 2);
+
+        assert_eq!(
+            patchset.patches()[0].operation(),
+            &FileOperation::Modify {
+                original: "a/file1.rs".to_owned(),
+                modified: "b/file1.rs".to_owned(),
+            }
+        );
+        assert_eq!(patchset.patches()[0].patch().hunks().len(), 1);
+
+        assert_eq!(
+            patchset.patches()[1].operation(),
+            &FileOperation::Modify {
+                original: "a/file2.rs".to_owned(),
+                modified: "b/file2.rs".to_owned(),
+            }
+        );
+        assert_eq!(patchset.patches()[1].patch().hunks().len(), 1);
     }
 
     #[test]
-    fn diff_git_not_boundary_in_unidiff_mode() {
-        // In UniDiff mode, `diff --git` is just noise before the real boundary
-        let content = "\
-diff --git a/file1.rs b/file1.rs
---- a/file1.rs
-+++ b/file1.rs
-@@ -1 +1 @@
--old1
-+new1
-diff --git a/file2.rs b/file2.rs
---- a/file2.rs
-+++ b/file2.rs
-@@ -1 +1 @@
--old2
-+new2
-";
-        let patches = split_patches(content, ParseMode::UniDiff);
-        assert_eq!(patches.len(), 2);
-        // Both should parse, the `diff --git` lines are just garbage before `---`
-        assert!(Patch::from_str(patches[0]).is_ok());
-        assert!(Patch::from_str(patches[1]).is_ok());
-    }
-
-    #[test]
-    fn git_headers_do_not_split_patch() {
-        // Git extended headers between `diff --git` and `---` should not cause split
+    fn modify_with_mode_change() {
         let content = "\
 diff --git a/file.rs b/file.rs
 old mode 100644
@@ -365,13 +383,21 @@ new mode 100755
 -old
 +new
 ";
-        let patches = split_patches(content, ParseMode::GitDiff);
-        assert_eq!(patches.len(), 1);
-        assert!(Patch::from_str(patches[0]).is_ok());
+        let patchset = PatchSet::parse(content, ParseMode::GitDiff).unwrap();
+        assert_eq!(patchset.len(), 1);
+
+        assert_eq!(
+            patchset.patches()[0].operation(),
+            &FileOperation::Modify {
+                original: "a/file.rs".to_owned(),
+                modified: "b/file.rs".to_owned(),
+            }
+        );
+        assert_eq!(patchset.patches()[0].patch().hunks().len(), 1);
     }
 
     #[test]
-    fn new_file_mode_header() {
+    fn create_file() {
         let content = "\
 diff --git a/new.sh b/new.sh
 new file mode 100755
@@ -380,13 +406,18 @@ new file mode 100755
 @@ -0,0 +1 @@
 +content
 ";
-        let patches = split_patches(content, ParseMode::GitDiff);
-        assert_eq!(patches.len(), 1);
-        assert!(Patch::from_str(patches[0]).is_ok());
+        let patchset = PatchSet::parse(content, ParseMode::GitDiff).unwrap();
+        assert_eq!(patchset.len(), 1);
+
+        assert_eq!(
+            patchset.patches()[0].operation(),
+            &FileOperation::Create("b/new.sh".to_owned())
+        );
+        assert_eq!(patchset.patches()[0].patch().hunks().len(), 1);
     }
 
     #[test]
-    fn deleted_file_mode_header() {
+    fn delete_file() {
         let content = "\
 diff --git a/old.sh b/old.sh
 deleted file mode 100755
@@ -395,43 +426,117 @@ deleted file mode 100755
 @@ -1 +0,0 @@
 -content
 ";
-        let patches = split_patches(content, ParseMode::GitDiff);
-        assert_eq!(patches.len(), 1);
-        assert!(Patch::from_str(patches[0]).is_ok());
+        let patchset = PatchSet::parse(content, ParseMode::GitDiff).unwrap();
+        assert_eq!(patchset.len(), 1);
+
+        assert_eq!(
+            patchset.patches()[0].operation(),
+            &FileOperation::Delete("a/old.sh".to_owned())
+        );
+        assert_eq!(patchset.patches()[0].patch().hunks().len(), 1);
     }
 
     #[test]
-    fn rename_headers() {
+    fn pure_rename() {
         let content = "\
 diff --git a/old.txt b/new.txt
 similarity index 100%
 rename from old.txt
 rename to new.txt
 ";
-        let patches = split_patches(content, ParseMode::GitDiff);
-        assert_eq!(patches.len(), 1);
-        // Pure rename has no hunks, but should still be one patch slice
+        let patchset = PatchSet::parse(content, ParseMode::GitDiff).unwrap();
+        assert_eq!(patchset.len(), 1);
+
+        assert_eq!(
+            patchset.patches()[0].operation(),
+            &FileOperation::Rename {
+                from: "old.txt".to_owned(),
+                to: "new.txt".to_owned(),
+            }
+        );
+        // Pure rename has no hunks
+        assert!(patchset.patches()[0].patch().hunks().is_empty());
     }
 
     #[test]
-    fn index_header_recognized() {
+    fn pure_copy() {
         let content = "\
-diff --git a/file.rs b/file.rs
-index 1234567..89abcdef 100644
---- a/file.rs
-+++ b/file.rs
-@@ -1 +1 @@
--old
-+new
+diff --git a/original.txt b/copy.txt
+similarity index 100%
+copy from original.txt
+copy to copy.txt
 ";
-        let patches = split_patches(content, ParseMode::GitDiff);
-        assert_eq!(patches.len(), 1);
-        assert!(Patch::from_str(patches[0]).is_ok());
+        let patchset = PatchSet::parse(content, ParseMode::GitDiff).unwrap();
+        assert_eq!(patchset.len(), 1);
+
+        assert_eq!(
+            patchset.patches()[0].operation(),
+            &FileOperation::Copy {
+                from: "original.txt".to_owned(),
+                to: "copy.txt".to_owned(),
+            }
+        );
+        // Pure copy has no hunks
+        assert!(patchset.patches()[0].patch().hunks().is_empty());
     }
 
     #[test]
-    fn commit_message_with_diff_git_text_inline() {
-        // Only the real "diff --git" at line start is detected
+    fn rename_with_changes() {
+        let content = "\
+diff --git a/old.txt b/new.txt
+similarity index 90%
+rename from old.txt
+rename to new.txt
+--- a/old.txt
++++ b/new.txt
+@@ -1 +1 @@
+-old content
++new content
+";
+        let patchset = PatchSet::parse(content, ParseMode::GitDiff).unwrap();
+        assert_eq!(patchset.len(), 1);
+
+        assert_eq!(
+            patchset.patches()[0].operation(),
+            &FileOperation::Rename {
+                from: "old.txt".to_owned(),
+                to: "new.txt".to_owned(),
+            }
+        );
+        // Rename with changes has hunks
+        assert_eq!(patchset.patches()[0].patch().hunks().len(), 1);
+    }
+
+    #[test]
+    fn copy_with_changes() {
+        let content = "\
+diff --git a/original.txt b/copy.txt
+similarity index 80%
+copy from original.txt
+copy to copy.txt
+--- a/original.txt
++++ b/copy.txt
+@@ -1,2 +1,3 @@
+ line1
+ line2
++line3
+";
+        let patchset = PatchSet::parse(content, ParseMode::GitDiff).unwrap();
+        assert_eq!(patchset.len(), 1);
+
+        assert_eq!(
+            patchset.patches()[0].operation(),
+            &FileOperation::Copy {
+                from: "original.txt".to_owned(),
+                to: "copy.txt".to_owned(),
+            }
+        );
+        // Copy with changes has hunks
+        assert_eq!(patchset.patches()[0].patch().hunks().len(), 1);
+    }
+
+    #[test]
+    fn format_patch_with_preamble() {
         let content = "\
 From abc123 Mon Sep 17 00:00:00 2001
 From: Test <test@test.com>
@@ -449,15 +554,66 @@ diff --git a/file.rs b/file.rs
  real
 +change
 ";
-        let patches = split_patches(content, ParseMode::GitDiff);
-        assert_eq!(patches.len(), 1);
-        assert!(Patch::from_str(patches[0]).is_ok());
+        let patchset = PatchSet::parse(content, ParseMode::GitDiff).unwrap();
+        assert_eq!(patchset.len(), 1);
+
+        assert_eq!(
+            patchset.patches()[0].operation(),
+            &FileOperation::Modify {
+                original: "a/file.rs".to_owned(),
+                modified: "b/file.rs".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn mode_only_change_not_supported() {
+        let content = "\
+diff --git a/script.sh b/script.sh
+old mode 100644
+new mode 100755
+";
+        let result = PatchSet::parse(content, ParseMode::GitDiff);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn binary_file_not_supported() {
+        let content = "\
+diff --git a/image.png b/image.png
+index 1234567..89abcdef 100644
+Binary files a/image.png and b/image.png differ
+";
+        let result = PatchSet::parse(content, ParseMode::GitDiff);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn index_header_recognized() {
+        let content = "\
+diff --git a/file.rs b/file.rs
+index 1234567..89abcdef 100644
+--- a/file.rs
++++ b/file.rs
+@@ -1 +1 @@
+-old
++new
+";
+        let patchset = PatchSet::parse(content, ParseMode::GitDiff).unwrap();
+        assert_eq!(patchset.len(), 1);
+        assert_eq!(
+            patchset.patches()[0].operation(),
+            &FileOperation::Modify {
+                original: "a/file.rs".to_owned(),
+                modified: "b/file.rs".to_owned(),
+            }
+        );
     }
 
     #[test]
     fn commit_message_with_diff_git_at_line_start() {
-        // "diff --git" in commit message is ignored because we strip the email preamble.
-        // This is an observed git behavior. See `strip_email_preamble`.
+        // "diff --git" in commit message is stripped by strip_email_preamble.
+        // This is observed git behavior.
         let content = "\
 From abc123 Mon Sep 17 00:00:00 2001
 Subject: [PATCH] test
@@ -482,11 +638,10 @@ diff --git a/file.rs b/file.rs
     }
 
     #[test]
-    fn multiple_separator_and_diff_git_in_commit_message() {
-        // Git uses the first `---` as separator,
-        // so the fake ones are included in patch.
-        //
-        // This is an observed git behavior. See `strip_email_preamble`.
+    fn multiple_separator_in_commit_message() {
+        // Git uses the first `\n---\n` as separator (observed git mailinfo behavior).
+        // The fake `diff --git` after first separator becomes a real patch boundary,
+        // but lacks `---`/`+++` headers, causing a parse error.
         let content = "\
 From abc123 Mon Sep 17 00:00:00 2001
 Subject: [PATCH] test
@@ -505,16 +660,14 @@ diff --git a/real.rs b/real.rs
  real
 +change
 ";
-        let patches = split_patches(content, ParseMode::GitDiff);
-        // First `---` is used as separator,
-        // so both fake and real `diff --git` are detected as patches.
-        assert_eq!(patches.len(), 2);
-        assert!(patches[0].contains("diff --git a/fake"));
-        assert!(patches[1].contains("diff --git a/real.rs"));
+        // First `---` strips preamble, exposing fake `diff --git` as patch boundary.
+        // The fake patch has no `---`/`+++` headers, so parsing fails.
+        let result = PatchSet::parse(content, ParseMode::GitDiff);
+        assert!(result.is_err());
     }
 
     #[test]
-    fn multiple_patches_with_various_headers() {
+    fn multiple_patches_with_various_operations() {
         let content = "\
 diff --git a/file1.rs b/file1.rs
 index 1111111..2222222 100644
@@ -536,11 +689,31 @@ deleted file mode 100644
 @@ -1 +0,0 @@
 -deleted
 ";
-        let patches = split_patches(content, ParseMode::GitDiff);
-        assert_eq!(patches.len(), 3);
-        assert!(Patch::from_str(patches[0]).is_ok());
-        assert!(Patch::from_str(patches[1]).is_ok());
-        assert!(Patch::from_str(patches[2]).is_ok());
+        let patchset = PatchSet::parse(content, ParseMode::GitDiff).unwrap();
+        assert_eq!(patchset.len(), 3);
+        assert!(patchset.patches()[0].operation().is_modify());
+        assert!(patchset.patches()[1].operation().is_create());
+        assert!(patchset.patches()[2].operation().is_delete());
+    }
+
+    #[test]
+    fn rename_with_spaces_in_path() {
+        let content = "\
+diff --git a/path with spaces/old file.txt b/path with spaces/new file.txt
+similarity index 100%
+rename from path with spaces/old file.txt
+rename to path with spaces/new file.txt
+";
+        let patchset = PatchSet::parse(content, ParseMode::GitDiff).unwrap();
+        assert_eq!(patchset.len(), 1);
+
+        assert_eq!(
+            patchset.patches()[0].operation(),
+            &FileOperation::Rename {
+                from: "path with spaces/old file.txt".to_owned(),
+                to: "path with spaces/new file.txt".to_owned(),
+            }
+        );
     }
 }
 
