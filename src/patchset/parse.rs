@@ -196,6 +196,11 @@ fn is_unidiff_boundary(prev: Option<&str>, line: &str, next: Option<&str>) -> bo
 ///
 /// [`git format-patch`]: https://git-scm.com/docs/git-format-patch
 fn strip_email_preamble(input: &str) -> &str {
+    // only strip preamble for mbox-formatted input
+    if !input.starts_with("From ") {
+        return input;
+    }
+
     match input.find(EMAIL_PREAMBLE_SEPARATOR) {
         Some(pos) => &input[pos + EMAIL_PREAMBLE_SEPARATOR.len()..],
         None => input,
