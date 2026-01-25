@@ -42,10 +42,10 @@ jobs:
           - name: diffy
             repo_url: ''
             commits: '0'
-          - name: cargo
+          - name: rust-lang/cargo
             repo_url: https://github.com/rust-lang/cargo
             commits: '200'
-          - name: rust
+          - name: rust-lang/rust
             repo_url: https://github.com/rust-lang/rust
             commits: '30'
     name: replay (${{ matrix.name }})
