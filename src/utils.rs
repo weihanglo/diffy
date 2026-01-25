@@ -242,6 +242,24 @@ fn find_byte(haystack: &[u8], byte: u8) -> Option<usize> {
 ///
 /// See [`ESCAPED_CHARS`] for supported escapes.
 pub(crate) fn escaped_filename<T: Text + ToOwned + ?Sized>(
+    filename: &T,
+) -> Result<Cow<'_, [u8]>, ParsePatchError> {
+    let is_quoted = filename
+        .strip_prefix("\"")
+        .and_then(|s| s.strip_suffix("\""));
+    if let Some(inner) = is_quoted {
+        _escaped_filename(inner)
+    } else {
+        // No need to escape
+        let bytes = filename.as_bytes();
+        if bytes.iter().any(|b| ESCAPED_CHARS_BYTES.contains(b)) {
+            return Err(ParsePatchError::new("invalid char in unquoted filename"));
+        }
+        Ok(bytes.into())
+    }
+}
+
+fn _escaped_filename<T: Text + ToOwned + ?Sized>(
     escaped: &T,
 ) -> Result<Cow<'_, [u8]>, ParsePatchError> {
     let bytes = escaped.as_bytes();

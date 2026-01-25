@@ -3,7 +3,7 @@
 use super::{Hunk, HunkRange, Line, NO_NEWLINE_AT_EOF};
 use crate::{
     patch::Patch,
-    utils::{escaped_filename, LineIter, Text, ESCAPED_CHARS_BYTES},
+    utils::{escaped_filename, LineIter, Text},
 };
 use std::{borrow::Cow, fmt};
 
@@ -139,27 +139,9 @@ fn parse_filename<'a, T: Text + ToOwned + ?Sized>(
         return Err(ParsePatchError::new("filename unterminated"));
     };
 
-    let filename = if let Some(quoted) = is_quoted(filename) {
-        escaped_filename(quoted)?
-    } else {
-        unescaped_filename(filename)?
-    };
+    let filename = escaped_filename(filename)?;
 
     Ok(filename)
-}
-
-fn is_quoted<T: Text + ?Sized>(s: &T) -> Option<&T> {
-    s.strip_prefix("\"").and_then(|s| s.strip_suffix("\""))
-}
-
-fn unescaped_filename<T: Text + ToOwned + ?Sized>(filename: &T) -> Result<Cow<'_, [u8]>> {
-    let bytes = filename.as_bytes();
-
-    if bytes.iter().any(|b| ESCAPED_CHARS_BYTES.contains(b)) {
-        return Err(ParsePatchError::new("invalid char in unquoted filename"));
-    }
-
-    Ok(bytes.into())
 }
 
 fn verify_hunks_in_order<T: ?Sized>(hunks: &[Hunk<'_, T>]) -> bool {
