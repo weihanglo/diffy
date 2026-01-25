@@ -21,6 +21,32 @@
 //! ## Requirements
 //!
 //! * Git must be installed and available in the system's PATH.
+//!
+//! ## Runbook
+//!
+//! Repo history for upstream projects (e.g., rust-lang/cargo, rust-lang/rust)
+//! is too long to run at full depth on every PR.
+//!
+//! This runbook guide you how run the workflow manually.
+//!
+//! **Replay rust-lang/cargo with deeper history:**
+//!
+//! ```console
+//! $ gh workflow run Replay -f repo_url=https://github.com/rust-lang/cargo -f commits=2000
+//! ```
+//!
+//! **Replay rust-lang/rust with a smaller depth first:**
+//!
+//! ```console
+//! $ gh workflow run Replay -f repo_url=https://github.com/rust-lang/rust -f commits=200
+//! ```
+//!
+//! **Monitor:**
+//!
+//! ```console
+//! $ gh run list -w Replay --limit 5
+//! $ gh run view --log-failed
+//! ```
 
 use std::env;
 use std::path::PathBuf;
