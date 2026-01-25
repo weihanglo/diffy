@@ -127,6 +127,33 @@ impl<'a, 'b, T: ToOwned + ?Sized> IntoIterator for &'b PatchSet<'a, T> {
     }
 }
 
+/// File mode extracted from git extended headers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileMode {
+    /// `100644` regular file
+    Regular,
+    /// `100755` executable file
+    Executable,
+    /// `120000` symlink
+    Symlink,
+    /// `160000` gitlink (submodule)
+    Gitlink,
+}
+
+impl std::str::FromStr for FileMode {
+    type Err = ParsePatchError;
+
+    fn from_str(mode: &str) -> Result<Self, Self::Err> {
+        match mode {
+            "100644" => Ok(Self::Regular),
+            "100755" => Ok(Self::Executable),
+            "120000" => Ok(Self::Symlink),
+            "160000" => Ok(Self::Gitlink),
+            _ => Err(ParsePatchError::new(format!("invalid file mode: {mode}"))),
+        }
+    }
+}
+
 /// A single file's patch with operation metadata.
 ///
 /// This combines a [`Patch`] with a [`FileOperation`]
