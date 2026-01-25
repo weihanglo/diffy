@@ -100,7 +100,7 @@ fn split_patches_gitdiff(content: &str) -> Vec<GitDiff<'_>> {
 }
 
 /// Splits a unified diff containing multiple file patches (UniDiff mode).
-pub(crate) fn split_patches_unidiff(content: &str) -> Vec<&str> {
+fn split_patches_unidiff(content: &str) -> Vec<&str> {
     let mut patches = Vec::new();
     let mut patch_start = None::<usize>;
     let mut prev_line = None::<&str>;
@@ -232,7 +232,7 @@ fn strip_email_signature(input: &str) -> &str {
 }
 
 /// Extracts the file operation from a patch based on its header paths.
-pub fn extract_file_op_unidiff(
+fn extract_file_op_unidiff(
     original: Option<&str>,
     modified: Option<&str>,
 ) -> Result<FileOperation, ParsePatchError> {
