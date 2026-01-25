@@ -18,7 +18,6 @@ on:
       repo_url:
         description: 'Git repository URL to clone and test against'
         required: true
-        default: ''
         type: string
       commits:
         description: 'Number of commits to replay'
