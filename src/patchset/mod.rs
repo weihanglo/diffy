@@ -165,7 +165,7 @@ impl std::str::FromStr for FileMode {
 /// (create, delete, modify, or rename).
 #[derive(Clone, PartialEq, Eq)]
 pub struct FilePatch<'a, T: ToOwned + ?Sized> {
-    operation: FileOperation,
+    operation: FileOperation<'a>,
     patch: Patch<'a, T>,
     old_mode: Option<FileMode>,
     new_mode: Option<FileMode>,
@@ -188,7 +188,7 @@ where
 
 impl<'a, T: ToOwned + ?Sized> FilePatch<'a, T> {
     fn new(
-        operation: FileOperation,
+        operation: FileOperation<'a>,
         patch: Patch<'a, T>,
         old_mode: Option<FileMode>,
         new_mode: Option<FileMode>,
@@ -202,7 +202,7 @@ impl<'a, T: ToOwned + ?Sized> FilePatch<'a, T> {
     }
 
     /// Returns the file operation for this patch.
-    pub fn operation(&self) -> &FileOperation {
+    pub fn operation(&self) -> &FileOperation<'a> {
         &self.operation
     }
 
@@ -232,59 +232,68 @@ impl<'a, T: ToOwned + ?Sized> FilePatch<'a, T> {
 /// This is determined by examining the `---` and `+++` header lines
 /// of a unified diff patch, and git extended headers when available.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum FileOperation {
+pub enum FileOperation<'a> {
     /// Delete a file (`+++ /dev/null`).
-    Delete(String),
+    Delete(Cow<'a, str>),
     /// Create a new file (`--- /dev/null`).
-    Create(String),
+    Create(Cow<'a, str>),
     /// Modify a file.
     ///
     /// * If `original == modified`, this is an in-place modification.
     /// * If they differ, the caller decides how to handle, e.g., treat as rename or error.
     ///
     /// Usually, the caller needs to strip the prefix from the paths to determine.
-    Modify { original: String, modified: String },
+    Modify {
+        original: Cow<'a, str>,
+        modified: Cow<'a, str>,
+    },
     /// Rename a file (move from `from` to `to`, delete `from`).
     ///
     /// Only produced when git extended headers explicitly indicate a rename.
-    Rename { from: String, to: String },
+    Rename {
+        from: Cow<'a, str>,
+        to: Cow<'a, str>,
+    },
     /// Copy a file (copy from `from` to `to`, keep `from`).
     ///
     /// Only produced when git extended headers explicitly indicate a copy.
-    Copy { from: String, to: String },
+    Copy {
+        from: Cow<'a, str>,
+        to: Cow<'a, str>,
+    },
 }
 
-impl FileOperation {
+impl FileOperation<'_> {
     /// Strip the first `n` path components from the paths in this operation.
     ///
     /// This is similar to the `-p` option in GNU patch. For example,
     /// `strip_prefix(1)` on a path `a/src/lib.rs` would return `src/lib.rs`.
-    pub fn strip_prefix(&self, n: usize) -> FileOperation {
-        fn strip(path: &str, n: usize) -> String {
+    pub fn strip_prefix(&self, n: usize) -> FileOperation<'_> {
+        fn strip(path: &str, n: usize) -> &str {
             let mut remaining = path;
             for _ in 0..n {
                 match remaining.split_once('/') {
                     Some((_first, rest)) => remaining = rest,
-                    None => return remaining.to_owned(),
+                    None => return remaining,
                 }
             }
-            remaining.to_owned()
+            remaining
         }
 
         match self {
-            FileOperation::Delete(path) => FileOperation::Delete(strip(path, n)),
-            FileOperation::Create(path) => FileOperation::Create(strip(path, n)),
+            FileOperation::Delete(path) => FileOperation::Delete(Cow::Borrowed(strip(path, n))),
+            FileOperation::Create(path) => FileOperation::Create(Cow::Borrowed(strip(path, n))),
             FileOperation::Modify { original, modified } => FileOperation::Modify {
-                original: strip(original, n),
-                modified: strip(modified, n),
+                original: Cow::Borrowed(strip(original, n)),
+                modified: Cow::Borrowed(strip(modified, n)),
             },
             FileOperation::Rename { from, to } => FileOperation::Rename {
-                from: strip(from, n),
-                to: strip(to, n),
+                from: Cow::Borrowed(strip(from, n)),
+                to: Cow::Borrowed(strip(to, n)),
             },
             FileOperation::Copy { from, to } => FileOperation::Copy {
-                from: strip(from, n),
-                to: strip(to, n),
+                from: Cow::Borrowed(strip(from, n)),
+                to: Cow::Borrowed(strip(to, n)),
             },
         }
     }
