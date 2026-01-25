@@ -45,11 +45,12 @@ use std::sync::Once;
 use diffy::patchset::FileOperation;
 use diffy::patchset::ParseMode;
 use diffy::patchset::PatchSet;
+use diffy::patchset::PatchSetParseError;
 
 /// Error type capturing only diffy errors, not test infrastructure failures.
 #[derive(Debug)]
 enum DiffyError {
-    Parse(diffy::ParsePatchError),
+    Parse(PatchSetParseError),
     Apply(diffy::ApplyError),
 }
 

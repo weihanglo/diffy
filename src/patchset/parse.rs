@@ -2,9 +2,9 @@
 
 use std::borrow::Cow;
 
-use super::{FileMode, FileOperation, FilePatch, ParseMode, PatchSet};
+use super::{FileMode, FileOperation, FilePatch, ParseMode, PatchSet, PatchSetParseError};
 use crate::utils::escaped_filename;
-use crate::{ParsePatchError, Patch};
+use crate::Patch;
 
 /// Prefix for the original file path (e.g., `--- a/file.rs`).
 const ORIGINAL_PREFIX: &str = "--- ";
@@ -19,7 +19,7 @@ const DEV_NULL: &str = "/dev/null";
 const EMAIL_PREAMBLE_SEPARATOR: &str = "\n---\n";
 
 /// Parse a multi-file patch.
-pub fn parse(input: &str, mode: ParseMode) -> Result<PatchSet<'_, str>, ParsePatchError> {
+pub fn parse(input: &str, mode: ParseMode) -> Result<PatchSet<'_, str>, PatchSetParseError> {
     // Email signatures would be parsed as a delete line and corrupt the hunk.
     // Must strip before parsing.
     let input = strip_email_signature(input);
@@ -30,14 +30,15 @@ pub fn parse(input: &str, mode: ParseMode) -> Result<PatchSet<'_, str>, ParsePat
     }
 }
 
-fn parse_gitdiff(input: &str) -> Result<PatchSet<'_, str>, ParsePatchError> {
+fn parse_gitdiff(input: &str) -> Result<PatchSet<'_, str>, PatchSetParseError> {
     // Strip email preamble to avoid false `diff --git` matches in commit messages.
     let input = strip_email_preamble(input);
 
     let mut patches = Vec::new();
     for raw in split_patches_gitdiff(input) {
         let header = GitHeader::parse(raw.header);
-        let patch = Patch::from_str(raw.patch)?;
+        let patch =
+            Patch::from_str(raw.patch).map_err(|e| PatchSetParseError::new(e.to_string()))?;
         let operation = extract_file_op_gitdiff(&header, &patch)?;
         let old_mode = header.old_mode.map(str::parse::<FileMode>).transpose()?;
         let new_mode = header.new_mode.map(str::parse::<FileMode>).transpose()?;
@@ -47,12 +48,13 @@ fn parse_gitdiff(input: &str) -> Result<PatchSet<'_, str>, ParsePatchError> {
     Ok(PatchSet::new(patches))
 }
 
-fn parse_unidiff(input: &str) -> Result<PatchSet<'_, str>, ParsePatchError> {
+fn parse_unidiff(input: &str) -> Result<PatchSet<'_, str>, PatchSetParseError> {
     let patch_strs = split_patches_unidiff(input);
 
     let mut patches = Vec::with_capacity(patch_strs.len());
     for patch_str in patch_strs {
-        let patch = Patch::from_str(patch_str)?;
+        let patch =
+            Patch::from_str(patch_str).map_err(|e| PatchSetParseError::new(e.to_string()))?;
         let operation = extract_file_op_unidiff(patch.original(), patch.modified())?;
         patches.push(FilePatch::new(operation, patch, None, None));
     }
@@ -232,26 +234,26 @@ fn strip_email_signature(input: &str) -> &str {
 }
 
 /// Extracts the file operation from a patch based on its header paths.
-fn extract_file_op_unidiff(
+pub fn extract_file_op_unidiff(
     original: Option<&str>,
     modified: Option<&str>,
-) -> Result<FileOperation, ParsePatchError> {
+) -> Result<FileOperation, PatchSetParseError> {
     let is_create = original == Some(DEV_NULL);
     let is_delete = modified == Some(DEV_NULL);
 
     if is_create && is_delete {
-        return Err(ParsePatchError::new(
+        return Err(PatchSetParseError::new(
             "patch has both original and modified as /dev/null",
         ));
     }
 
     if is_delete {
         let path =
-            original.ok_or_else(|| ParsePatchError::new("delete patch has no original path"))?;
+            original.ok_or_else(|| PatchSetParseError::new("delete patch has no original path"))?;
         Ok(FileOperation::Delete(path.to_owned()))
     } else if is_create {
         let path =
-            modified.ok_or_else(|| ParsePatchError::new("create patch has no modified path"))?;
+            modified.ok_or_else(|| PatchSetParseError::new("create patch has no modified path"))?;
         Ok(FileOperation::Create(path.to_owned()))
     } else {
         match (original, modified) {
@@ -274,7 +276,7 @@ fn extract_file_op_unidiff(
                     modified: original.to_owned(),
                 })
             }
-            (None, None) => Err(ParsePatchError::new("patch has no file path")),
+            (None, None) => Err(PatchSetParseError::new("patch has no file path")),
         }
     }
 }
@@ -283,7 +285,7 @@ fn extract_file_op_unidiff(
 fn extract_file_op_gitdiff(
     header: &GitHeader<'_>,
     patch: &Patch<'_, str>,
-) -> Result<FileOperation, ParsePatchError> {
+) -> Result<FileOperation, PatchSetParseError> {
     // Git headers are authoritative for rename/copy
     if let (Some(from), Some(to)) = (header.rename_from, header.rename_to) {
         return Ok(FileOperation::Rename {
@@ -305,7 +307,7 @@ fn extract_file_op_gitdiff(
 
     // Fall back to `diff --git <old> <new>` for mode-only and empty file changes.
     let Some((original, modified)) = header.diff_git_line.and_then(parse_diff_git_path) else {
-        return Err(ParsePatchError::new("unable to parse `diff --git` path"));
+        return Err(PatchSetParseError::new("unable to parse `diff --git` path"));
     };
 
     let op = if header.new_file_mode.is_some() {
