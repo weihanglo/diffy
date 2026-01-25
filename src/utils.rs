@@ -1,9 +1,19 @@
 //! Common utilities
 
 use std::{
+    borrow::Cow,
     collections::{hash_map::Entry, HashMap},
     hash::Hash,
 };
+
+use crate::ParsePatchError;
+
+/// Characters that require escaping in filenames.
+pub const ESCAPED_CHARS: &[char] = &['\n', '\t', '\0', '\r', '\"', '\\'];
+
+/// Like [`ESCAPED_CHARS`] but in byte representation.
+#[allow(clippy::byte_char_slices)]
+pub const ESCAPED_CHARS_BYTES: &[u8] = &[b'\n', b'\t', b'\0', b'\r', b'\"', b'\\'];
 
 /// Classifies lines, converting lines into unique `u64`s for quicker comparison
 pub struct Classifier<'a, T: ?Sized> {
@@ -226,4 +236,38 @@ fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 // XXX Maybe use `memchr`?
 fn find_byte(haystack: &[u8], byte: u8) -> Option<usize> {
     haystack.iter().position(|&b| b == byte)
+}
+
+/// Decodes escape sequences in a quoted filename.
+///
+/// See [`ESCAPED_CHARS`] for supported escapes.
+pub(crate) fn escaped_filename<T: Text + ToOwned + ?Sized>(
+    escaped: &T,
+) -> Result<Cow<'_, [u8]>, ParsePatchError> {
+    let mut filename = Vec::new();
+
+    let mut chars = escaped.as_bytes().iter().copied();
+    while let Some(c) = chars.next() {
+        if c == b'\\' {
+            let ch = match chars
+                .next()
+                .ok_or_else(|| ParsePatchError::new("expected escaped character"))?
+            {
+                b'n' => b'\n',
+                b't' => b'\t',
+                b'0' => b'\0',
+                b'r' => b'\r',
+                b'\"' => b'\"',
+                b'\\' => b'\\',
+                _ => return Err(ParsePatchError::new("invalid escaped character")),
+            };
+            filename.push(ch);
+        } else if ESCAPED_CHARS_BYTES.contains(&c) {
+            return Err(ParsePatchError::new("invalid unescaped character"));
+        } else {
+            filename.push(c);
+        }
+    }
+
+    Ok(filename.into())
 }
