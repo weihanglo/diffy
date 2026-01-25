@@ -2,6 +2,7 @@
 
 use super::parse::extract_file_op_unidiff;
 use super::parse::split_patches_unidiff;
+use super::FileMode;
 use super::FileOperation;
 use super::ParseMode;
 use super::PatchSet;
@@ -437,6 +438,40 @@ deleted file mode 100755
     }
 
     #[test]
+    fn empty_file_create() {
+        let content = "\
+diff --git a/empty.txt b/empty.txt
+new file mode 100644
+index 0000000..e69de29
+";
+        let patchset = PatchSet::parse(content, ParseMode::GitDiff).unwrap();
+        assert_eq!(patchset.len(), 1);
+
+        assert_eq!(
+            patchset.patches()[0].operation(),
+            &FileOperation::Create("b/empty.txt".to_owned())
+        );
+        assert!(patchset.patches()[0].patch().hunks().is_empty());
+    }
+
+    #[test]
+    fn empty_file_delete() {
+        let content = "\
+diff --git a/empty.txt b/empty.txt
+deleted file mode 100644
+index e69de29..0000000
+";
+        let patchset = PatchSet::parse(content, ParseMode::GitDiff).unwrap();
+        assert_eq!(patchset.len(), 1);
+
+        assert_eq!(
+            patchset.patches()[0].operation(),
+            &FileOperation::Delete("a/empty.txt".to_owned())
+        );
+        assert!(patchset.patches()[0].patch().hunks().is_empty());
+    }
+
+    #[test]
     fn pure_rename() {
         let content = "\
 diff --git a/old.txt b/new.txt
@@ -536,6 +571,37 @@ copy to copy.txt
     }
 
     #[test]
+    fn rename_with_mode_change() {
+        // Rename + mode change can coexist in a single patch
+        let content = "\
+diff --git a/file.sh b/renamed.sh
+old mode 100644
+new mode 100755
+similarity index 100%
+rename from file.sh
+rename to renamed.sh
+";
+        let patchset = PatchSet::parse(content, ParseMode::GitDiff).unwrap();
+        assert_eq!(patchset.len(), 1);
+
+        // Operation is Rename; mode change is orthogonal metadata
+        assert_eq!(
+            patchset.patches()[0].operation(),
+            &FileOperation::Rename {
+                from: "file.sh".to_owned(),
+                to: "renamed.sh".to_owned(),
+            }
+        );
+        assert!(patchset.patches()[0].patch().hunks().is_empty());
+
+        assert_eq!(patchset.patches()[0].old_mode(), Some(&FileMode::Regular));
+        assert_eq!(
+            patchset.patches()[0].new_mode(),
+            Some(&FileMode::Executable)
+        );
+    }
+
+    #[test]
     fn format_patch_with_preamble() {
         let content = "\
 From abc123 Mon Sep 17 00:00:00 2001
@@ -567,25 +633,263 @@ diff --git a/file.rs b/file.rs
     }
 
     #[test]
-    fn mode_only_change_not_supported() {
+    fn mode_only_change() {
         let content = "\
 diff --git a/script.sh b/script.sh
 old mode 100644
 new mode 100755
 ";
-        let result = PatchSet::parse(content, ParseMode::GitDiff);
-        assert!(result.is_err());
+        let patchset = PatchSet::parse(content, ParseMode::GitDiff).unwrap();
+        assert_eq!(patchset.len(), 1);
+
+        // Mode-only change is represented as Modify with empty hunks
+        assert_eq!(
+            patchset.patches()[0].operation(),
+            &FileOperation::Modify {
+                original: "a/script.sh".to_owned(),
+                modified: "b/script.sh".to_owned(),
+            }
+        );
+        assert!(patchset.patches()[0].patch().hunks().is_empty());
+
+        assert_eq!(patchset.patches()[0].old_mode(), Some(&FileMode::Regular));
+        assert_eq!(
+            patchset.patches()[0].new_mode(),
+            Some(&FileMode::Executable)
+        );
     }
 
     #[test]
-    fn binary_file_not_supported() {
+    fn mode_only_no_prefix() {
+        // `git diff --no-prefix`: both sides identical, handled by special case.
+        let content = "\
+diff --git script.sh script.sh
+old mode 100644
+new mode 100755
+";
+        let patchset = PatchSet::parse(content, ParseMode::GitDiff).unwrap();
+        assert_eq!(patchset.len(), 1);
+        assert_eq!(
+            patchset.patches()[0].operation(),
+            &FileOperation::Modify {
+                original: "script.sh".to_owned(),
+                modified: "script.sh".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn mode_only_paths_with_spaces() {
+        let content = "\
+diff --git a/script name.sh b/script name.sh
+old mode 100644
+new mode 100755
+";
+        let patchset = PatchSet::parse(content, ParseMode::GitDiff).unwrap();
+        assert_eq!(patchset.len(), 1);
+        assert_eq!(
+            patchset.patches()[0].operation(),
+            &FileOperation::Modify {
+                original: "a/script name.sh".to_owned(),
+                modified: "b/script name.sh".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn mode_only_path_containing_space_b_slash() {
+        // Path contains ` b/` which could confuse naive "split at ` b/`" parsing.
+        let content = "\
+diff --git a/path/to/my b/file.txt b/path/to/my b/file.txt
+old mode 100644
+new mode 100755
+";
+        let patchset = PatchSet::parse(content, ParseMode::GitDiff).unwrap();
+        assert_eq!(patchset.len(), 1);
+        assert_eq!(
+            patchset.patches()[0].operation(),
+            &FileOperation::Modify {
+                original: "a/path/to/my b/file.txt".to_owned(),
+                modified: "b/path/to/my b/file.txt".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn mode_only_custom_prefix() {
+        let content = "\
+diff --git src/script.sh dst/script.sh
+old mode 100644
+new mode 100755
+";
+        let patchset = PatchSet::parse(content, ParseMode::GitDiff).unwrap();
+        assert_eq!(patchset.len(), 1);
+        assert_eq!(
+            patchset.patches()[0].operation(),
+            &FileOperation::Modify {
+                original: "src/script.sh".to_owned(),
+                modified: "dst/script.sh".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn mode_only_different_prefix_depths() {
+        // Custom prefixes with different directory depths.
+        let content = "\
+diff --git src/main/java/file.txt target/file.txt
+old mode 100644
+new mode 100755
+";
+        let patchset = PatchSet::parse(content, ParseMode::GitDiff).unwrap();
+        assert_eq!(patchset.len(), 1);
+        assert_eq!(
+            patchset.patches()[0].operation(),
+            &FileOperation::Modify {
+                original: "src/main/java/file.txt".to_owned(),
+                modified: "target/file.txt".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn mode_only_quoted_with_escapes() {
+        // Quoted paths with escape sequences (tab, backslash).
+        let content = "\
+diff --git \"a/file\\twith\\ttab.sh\" \"b/file\\twith\\ttab.sh\"
+old mode 100644
+new mode 100755
+";
+        let patchset = PatchSet::parse(content, ParseMode::GitDiff).unwrap();
+        assert_eq!(patchset.len(), 1);
+        assert_eq!(
+            patchset.patches()[0].operation(),
+            &FileOperation::Modify {
+                original: "a/file\twith\ttab.sh".to_owned(),
+                modified: "b/file\twith\ttab.sh".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn mode_only_old_quoted_new_unquoted() {
+        // Old path quoted (with escape in prefix), new path unquoted.
+        let content = "\
+diff --git \"a\\t/script.sh\" b/script.sh
+old mode 100644
+new mode 100755
+";
+        let patchset = PatchSet::parse(content, ParseMode::GitDiff).unwrap();
+        assert_eq!(patchset.len(), 1);
+        assert_eq!(
+            patchset.patches()[0].operation(),
+            &FileOperation::Modify {
+                original: "a\t/script.sh".to_owned(),
+                modified: "b/script.sh".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn mode_only_old_unquoted_new_quoted() {
+        // Old path unquoted, new path quoted (with escape in prefix).
+        let content = "\
+diff --git a/script.sh \"b\\t/script.sh\"
+old mode 100644
+new mode 100755
+";
+        let patchset = PatchSet::parse(content, ParseMode::GitDiff).unwrap();
+        assert_eq!(patchset.len(), 1);
+        assert_eq!(
+            patchset.patches()[0].operation(),
+            &FileOperation::Modify {
+                original: "a/script.sh".to_owned(),
+                modified: "b\t/script.sh".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn mode_only_ambiguous_splits() {
+        // Multiple space positions could split the line; algorithm picks longest suffix.
+        // `--src-prefix="src/foo.rs "` produces this pathological case.
+        let content = "\
+diff --git src/foo.rs src/foo.rs src/foo.rs src/foo.rs
+old mode 100644
+new mode 100755
+";
+        let patchset = PatchSet::parse(content, ParseMode::GitDiff).unwrap();
+        assert_eq!(patchset.len(), 1);
+        assert_eq!(
+            patchset.patches()[0].operation(),
+            &FileOperation::Modify {
+                original: "src/foo.rs src/foo.rs".to_owned(),
+                modified: "src/foo.rs src/foo.rs".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn mode_only_path_component_boundary() {
+        // "fofoo/bar.rs" vs "foo/bar.rs": suffix stops at `/` boundary.
+        let content = "\
+diff --git fofoo/bar.rs foo/bar.rs
+old mode 100644
+new mode 100755
+";
+        let patchset = PatchSet::parse(content, ParseMode::GitDiff).unwrap();
+        assert_eq!(patchset.len(), 1);
+        assert_eq!(
+            patchset.patches()[0].operation(),
+            &FileOperation::Modify {
+                original: "fofoo/bar.rs".to_owned(),
+                modified: "foo/bar.rs".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn mode_only_mismatched_paths_error() {
+        // Different filenames: no valid common suffix, should fail to parse.
+        let content = "\
+diff --git a/foo.rs b/bar.rs
+old mode 100644
+new mode 100755
+";
+        assert!(PatchSet::parse(content, ParseMode::GitDiff).is_err());
+    }
+
+    #[test]
+    fn mode_only_empty_filename_error() {
+        // Trailing slash means empty filename, should fail.
+        let content = "\
+diff --git a/ b/
+old mode 100644
+new mode 100755
+";
+        assert!(PatchSet::parse(content, ParseMode::GitDiff).is_err());
+    }
+
+    #[test]
+    fn binary_file() {
         let content = "\
 diff --git a/image.png b/image.png
 index 1234567..89abcdef 100644
 Binary files a/image.png and b/image.png differ
 ";
-        let result = PatchSet::parse(content, ParseMode::GitDiff);
-        assert!(result.is_err());
+        let patchset = PatchSet::parse(content, ParseMode::GitDiff).unwrap();
+        assert_eq!(patchset.len(), 1);
+
+        // Binary file is represented as Modify with empty hunks
+        // TODO: true binary patch support
+        assert_eq!(
+            patchset.patches()[0].operation(),
+            &FileOperation::Modify {
+                original: "a/image.png".to_owned(),
+                modified: "b/image.png".to_owned(),
+            }
+        );
+        assert!(patchset.patches()[0].patch().hunks().is_empty());
     }
 
     #[test]
@@ -640,8 +944,7 @@ diff --git a/file.rs b/file.rs
     #[test]
     fn multiple_separator_in_commit_message() {
         // Git uses the first `\n---\n` as separator (observed git mailinfo behavior).
-        // The fake `diff --git` after first separator becomes a real patch boundary,
-        // but lacks `---`/`+++` headers, causing a parse error.
+        // The fake `diff --git` after first separator becomes a real patch boundary.
         let content = "\
 From abc123 Mon Sep 17 00:00:00 2001
 Subject: [PATCH] test
@@ -661,9 +964,11 @@ diff --git a/real.rs b/real.rs
 +change
 ";
         // First `---` strips preamble, exposing fake `diff --git` as patch boundary.
-        // The fake patch has no `---`/`+++` headers, so parsing fails.
-        let result = PatchSet::parse(content, ParseMode::GitDiff);
-        assert!(result.is_err());
+        // fake has no `---`/`+++` headers, parsed as Modify with empty hunks.
+        let patchset = PatchSet::parse(content, ParseMode::GitDiff).unwrap();
+        assert_eq!(patchset.len(), 2);
+        assert!(patchset.patches()[0].patch().hunks().is_empty());
+        assert_eq!(patchset.patches()[1].patch().hunks().len(), 1);
     }
 
     #[test]

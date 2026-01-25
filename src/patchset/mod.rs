@@ -163,6 +163,8 @@ impl std::str::FromStr for FileMode {
 pub struct FilePatch<'a, T: ToOwned + ?Sized> {
     operation: FileOperation,
     patch: Patch<'a, T>,
+    old_mode: Option<FileMode>,
+    new_mode: Option<FileMode>,
 }
 
 impl<T: ?Sized, O> std::fmt::Debug for FilePatch<'_, T>
@@ -174,13 +176,25 @@ where
         f.debug_struct("FilePatch")
             .field("operation", &self.operation)
             .field("patch", &self.patch)
+            .field("old_mode", &self.old_mode)
+            .field("new_mode", &self.new_mode)
             .finish()
     }
 }
 
 impl<'a, T: ToOwned + ?Sized> FilePatch<'a, T> {
-    fn new(operation: FileOperation, patch: Patch<'a, T>) -> Self {
-        Self { operation, patch }
+    fn new(
+        operation: FileOperation,
+        patch: Patch<'a, T>,
+        old_mode: Option<FileMode>,
+        new_mode: Option<FileMode>,
+    ) -> Self {
+        Self {
+            operation,
+            patch,
+            old_mode,
+            new_mode,
+        }
     }
 
     /// Returns the file operation for this patch.
@@ -196,6 +210,16 @@ impl<'a, T: ToOwned + ?Sized> FilePatch<'a, T> {
     /// Consumes the [`FilePatch`] and returns the underlying [`Patch`].
     pub fn into_patch(self) -> Patch<'a, T> {
         self.patch
+    }
+
+    /// Returns the old file mode, if present.
+    pub fn old_mode(&self) -> Option<&FileMode> {
+        self.old_mode.as_ref()
+    }
+
+    /// Returns the new file mode, if present.
+    pub fn new_mode(&self) -> Option<&FileMode> {
+        self.new_mode.as_ref()
     }
 }
 
