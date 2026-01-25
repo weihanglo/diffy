@@ -216,12 +216,22 @@ impl<'a, T: ToOwned + ?Sized> FilePatch<'a, T> {
         self.patch
     }
 
-    /// Returns the old file mode, if present.
+    /// Returns the file mode before applying this patch (when known).
+    ///
+    /// This is typically populated for
+    ///
+    /// * mode changes (`old mode <mode>` header)
+    /// * deletions (`deleted file mode <mode>` header)
     pub fn old_mode(&self) -> Option<&FileMode> {
         self.old_mode.as_ref()
     }
 
-    /// Returns the new file mode, if present.
+    /// Returns the file mode **after** applying this patch (when known).
+    ///
+    /// This is typically populated for
+    ///
+    /// * mode changes (the `new mode <mode>` header)
+    /// * creations (the `new file mode <mode>` header)
     pub fn new_mode(&self) -> Option<&FileMode> {
         self.new_mode.as_ref()
     }
