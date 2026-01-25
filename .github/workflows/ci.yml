@@ -51,5 +51,6 @@ jobs:
     name: replay (${{ matrix.name }})
     uses: ./.github/workflows/replay.yml
     with:
+      name: ${{ matrix.name }}
       repo_url: ${{ matrix.repo_url }}
       commits: ${{ matrix.commits }}
