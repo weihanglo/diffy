@@ -252,6 +252,12 @@ fn hunk_lines<'a, T: Text + ?Sized>(
         let line = if line.starts_with("@") {
             break;
         } else if no_newline_context {
+            // After `\ No newline at end of file` on a context line,
+            // only a new hunk header is valid. Any other line means
+            // the hunk should be complete, or it's an error.
+            if hunk_complete {
+                break;
+            }
             return Err(ParsePatchError::new("expected end of hunk"));
         } else if let Some(line) = line.strip_prefix(" ") {
             Line::Context(line)
@@ -414,12 +420,10 @@ index 1234567..89abcdef 100644
 diff --git a/other.html b/other.html
 index 1234567..89abcdef 100644
 ";
-        let result = parse(s);
-        assert!(
-            result.is_err(),
-            "BUG: This test documents current broken behavior. \
-             After fix, change to unwrap() and verify hunks."
-        );
+        let patch = parse(s).unwrap();
+        assert_eq!(patch.hunks().len(), 1);
+        assert_eq!(patch.hunks()[0].old_range().len(), 3);
+        assert_eq!(patch.hunks()[0].new_range().len(), 3);
     }
 
     #[test]
