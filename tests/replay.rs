@@ -358,8 +358,7 @@ fn test_replay() {
     let commits = commit_history(&repo, max);
 
     if commits.len() < 2 {
-        eprintln!("Not enough commits to test, skipping");
-        return;
+        panic!("Not enough commits to test");
     }
 
     let total_diffs = commits.len() - 1;
