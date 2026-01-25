@@ -3,13 +3,18 @@ name: Replay
 on:
   workflow_call:
     inputs:
+      name:
+        description: 'Display name (if set, job shows only parse_mode)'
+        required: false
+        default: ''
+        type: string
       repo_url:
         description: 'Git repository URL to clone and test against'
         required: false
         default: ''
         type: string
       commits:
-        description: 'Number of commits to replay'
+        description: 'Number of commits to replay (0 = all commits)'
         required: true
         type: string
 
@@ -20,7 +25,7 @@ on:
         required: true
         type: string
       commits:
-        description: 'Number of commits to replay'
+        description: 'Number of commits to replay (0 = all commits)'
         required: true
         default: '200'
         type: string
@@ -35,14 +40,19 @@ jobs:
     strategy:
       matrix:
         parse_mode: [unidiff, gitdiff]
-    name: ${{ matrix.parse_mode }}
+    name: ${{ inputs.name && matrix.parse_mode || format('{0} ({1})', inputs.repo_url, matrix.parse_mode) }}
     continue-on-error: ${{ matrix.parse_mode == 'gitdiff' }}
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: ${{ inputs.repo_url && 1 || 0 }}
       - if: inputs.repo_url != ''
-        run: git clone ${{ inputs.repo_url }} --depth $(( ${{ inputs.commits }} + 1 )) target/test-repo
+        run: |
+          if [ "${{ inputs.commits }}" = "0" ]; then
+            git clone ${{ inputs.repo_url }} target/test-repo
+          else
+            git clone ${{ inputs.repo_url }} --depth $(( ${{ inputs.commits }} + 1 )) target/test-repo
+          fi
       - run: rustup toolchain install stable --profile minimal
       - run: cargo test --release --test replay -- --nocapture
         env:
