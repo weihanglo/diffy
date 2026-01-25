@@ -228,9 +228,18 @@ fn process_commit(
             .lines()
             .filter(|l| !l.is_empty())
             .filter(|line| {
-                // `--numstat` format: `added\tdeleted\tpath` or `-\t-\tpath` for binary
-                // Empty files show as "0\t0\tpath"
-                !line.starts_with("0\t0\t")
+                // In UniDiff mode, `diff` output may omit `---/+++` and hunks
+                // for changes we intentionally do not support.
+                //
+                // `--numstat` format:
+                //
+                // - `added\tdeleted\tpath`
+                // - `-\t-\tpath` for binary
+                // - `0\t0\tpath` for empty/no-content changes
+                //
+                // We exclude these unsupported cases so `expected_file_count` matches what
+                // UniDiff parsing can actually produce.
+                !line.starts_with("0\t0\t") && !line.starts_with("-\t-\t")
             })
             .count()
     } else {
