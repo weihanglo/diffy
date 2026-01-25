@@ -1,9 +1,19 @@
 //! Common utilities
 
 use std::{
+    borrow::Cow,
     collections::{hash_map::Entry, HashMap},
     hash::Hash,
 };
+
+use crate::ParsePatchError;
+
+/// Characters that require escaping in filenames.
+pub const ESCAPED_CHARS: &[char] = &['\n', '\t', '\0', '\r', '\"', '\\'];
+
+/// Like [`ESCAPED_CHARS`] but in byte representation.
+#[allow(clippy::byte_char_slices)]
+pub const ESCAPED_CHARS_BYTES: &[u8] = &[b'\n', b'\t', b'\0', b'\r', b'\"', b'\\'];
 
 /// Classifies lines, converting lines into unique `u64`s for quicker comparison
 pub struct Classifier<'a, T: ?Sized> {
@@ -226,4 +236,71 @@ fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 // XXX Maybe use `memchr`?
 fn find_byte(haystack: &[u8], byte: u8) -> Option<usize> {
     haystack.iter().position(|&b| b == byte)
+}
+
+/// Decodes escape sequences in a quoted filename.
+///
+/// See [`ESCAPED_CHARS`] for supported escapes.
+pub(crate) fn escaped_filename<T: Text + ToOwned + ?Sized>(
+    filename: &T,
+) -> Result<Cow<'_, [u8]>, ParsePatchError> {
+    let is_quoted = filename
+        .strip_prefix("\"")
+        .and_then(|s| s.strip_suffix("\""));
+    if let Some(inner) = is_quoted {
+        _escaped_filename(inner)
+    } else {
+        // No need to escape
+        let bytes = filename.as_bytes();
+        if bytes.iter().any(|b| ESCAPED_CHARS_BYTES.contains(b)) {
+            return Err(ParsePatchError::new("invalid char in unquoted filename"));
+        }
+        Ok(bytes.into())
+    }
+}
+
+fn _escaped_filename<T: Text + ToOwned + ?Sized>(
+    escaped: &T,
+) -> Result<Cow<'_, [u8]>, ParsePatchError> {
+    let bytes = escaped.as_bytes();
+    let mut result = Vec::new();
+    let mut i = 0;
+    let mut last_copy = 0;
+    let mut needs_allocation = false;
+
+    while i < bytes.len() {
+        if bytes[i] == b'\\' {
+            needs_allocation = true;
+            result.extend_from_slice(&bytes[last_copy..i]);
+
+            i += 1;
+            if i >= bytes.len() {
+                return Err(ParsePatchError::new("expected escaped character"));
+            }
+
+            let decoded = match bytes[i] {
+                b'n' => b'\n',
+                b't' => b'\t',
+                b'0' => b'\0',
+                b'r' => b'\r',
+                b'\"' => b'\"',
+                b'\\' => b'\\',
+                _ => return Err(ParsePatchError::new("invalid escaped character")),
+            };
+            result.push(decoded);
+            i += 1;
+            last_copy = i;
+        } else if ESCAPED_CHARS_BYTES.contains(&bytes[i]) {
+            return Err(ParsePatchError::new("invalid unescaped character"));
+        } else {
+            i += 1;
+        }
+    }
+
+    if needs_allocation {
+        result.extend_from_slice(&bytes[last_copy..]);
+        Ok(Cow::Owned(result))
+    } else {
+        Ok(Cow::Borrowed(bytes))
+    }
 }

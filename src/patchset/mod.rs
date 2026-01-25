@@ -84,7 +84,7 @@ impl<'a> PatchSet<'a, str> {
 }
 
 impl<'a, T: ToOwned + ?Sized> PatchSet<'a, T> {
-    pub(crate) fn new(patches: Vec<FilePatch<'a, T>>) -> Self {
+    fn new(patches: Vec<FilePatch<'a, T>>) -> Self {
         Self { patches }
     }
 
@@ -127,6 +127,33 @@ impl<'a, 'b, T: ToOwned + ?Sized> IntoIterator for &'b PatchSet<'a, T> {
     }
 }
 
+/// File mode extracted from git extended headers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileMode {
+    /// `100644` regular file
+    Regular,
+    /// `100755` executable file
+    Executable,
+    /// `120000` symlink
+    Symlink,
+    /// `160000` gitlink (submodule)
+    Gitlink,
+}
+
+impl std::str::FromStr for FileMode {
+    type Err = ParsePatchError;
+
+    fn from_str(mode: &str) -> Result<Self, Self::Err> {
+        match mode {
+            "100644" => Ok(Self::Regular),
+            "100755" => Ok(Self::Executable),
+            "120000" => Ok(Self::Symlink),
+            "160000" => Ok(Self::Gitlink),
+            _ => Err(ParsePatchError::new(format!("invalid file mode: {mode}"))),
+        }
+    }
+}
+
 /// A single file's patch with operation metadata.
 ///
 /// This combines a [`Patch`] with a [`FileOperation`]
@@ -136,6 +163,8 @@ impl<'a, 'b, T: ToOwned + ?Sized> IntoIterator for &'b PatchSet<'a, T> {
 pub struct FilePatch<'a, T: ToOwned + ?Sized> {
     operation: FileOperation,
     patch: Patch<'a, T>,
+    old_mode: Option<FileMode>,
+    new_mode: Option<FileMode>,
 }
 
 impl<T: ?Sized, O> std::fmt::Debug for FilePatch<'_, T>
@@ -147,13 +176,25 @@ where
         f.debug_struct("FilePatch")
             .field("operation", &self.operation)
             .field("patch", &self.patch)
+            .field("old_mode", &self.old_mode)
+            .field("new_mode", &self.new_mode)
             .finish()
     }
 }
 
 impl<'a, T: ToOwned + ?Sized> FilePatch<'a, T> {
-    pub(crate) fn new(operation: FileOperation, patch: Patch<'a, T>) -> Self {
-        Self { operation, patch }
+    fn new(
+        operation: FileOperation,
+        patch: Patch<'a, T>,
+        old_mode: Option<FileMode>,
+        new_mode: Option<FileMode>,
+    ) -> Self {
+        Self {
+            operation,
+            patch,
+            old_mode,
+            new_mode,
+        }
     }
 
     /// Returns the file operation for this patch.
@@ -169,6 +210,16 @@ impl<'a, T: ToOwned + ?Sized> FilePatch<'a, T> {
     /// Consumes the [`FilePatch`] and returns the underlying [`Patch`].
     pub fn into_patch(self) -> Patch<'a, T> {
         self.patch
+    }
+
+    /// Returns the old file mode, if present.
+    pub fn old_mode(&self) -> Option<&FileMode> {
+        self.old_mode.as_ref()
+    }
+
+    /// Returns the new file mode, if present.
+    pub fn new_mode(&self) -> Option<&FileMode> {
+        self.new_mode.as_ref()
     }
 }
 
