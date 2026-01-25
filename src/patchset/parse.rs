@@ -40,8 +40,16 @@ fn parse_gitdiff(input: &str) -> Result<PatchSet<'_, str>, PatchSetParseError> {
         let patch =
             Patch::from_str(raw.patch).map_err(|e| PatchSetParseError::new(e.to_string()))?;
         let operation = extract_file_op_gitdiff(&header, &patch)?;
-        let old_mode = header.old_mode.map(str::parse::<FileMode>).transpose()?;
-        let new_mode = header.new_mode.map(str::parse::<FileMode>).transpose()?;
+        let old_mode = header
+            .old_mode
+            .or(header.deleted_file_mode)
+            .map(str::parse::<FileMode>)
+            .transpose()?;
+        let new_mode = header
+            .new_mode
+            .or(header.new_file_mode)
+            .map(str::parse::<FileMode>)
+            .transpose()?;
         patches.push(FilePatch::new(operation, patch, old_mode, new_mode));
     }
 

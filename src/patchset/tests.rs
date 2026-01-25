@@ -122,7 +122,10 @@ new file mode 100755
         );
         assert_eq!(patchset.patches()[0].patch().hunks().len(), 1);
         assert_eq!(patchset.patches()[0].old_mode(), None);
-        assert_eq!(patchset.patches()[0].new_mode(), None);
+        assert_eq!(
+            patchset.patches()[0].new_mode(),
+            Some(&FileMode::Executable)
+        );
     }
 
     #[test]
@@ -143,7 +146,10 @@ deleted file mode 100755
             &FileOperation::Delete("a/old.sh".to_owned().into())
         );
         assert_eq!(patchset.patches()[0].patch().hunks().len(), 1);
-        assert_eq!(patchset.patches()[0].old_mode(), None);
+        assert_eq!(
+            patchset.patches()[0].old_mode(),
+            Some(&FileMode::Executable)
+        );
         assert_eq!(patchset.patches()[0].new_mode(), None);
     }
 
@@ -163,7 +169,7 @@ index 0000000..e69de29
         );
         assert!(patchset.patches()[0].patch().hunks().is_empty());
         assert_eq!(patchset.patches()[0].old_mode(), None);
-        assert_eq!(patchset.patches()[0].new_mode(), None);
+        assert_eq!(patchset.patches()[0].new_mode(), Some(&FileMode::Regular));
     }
 
     #[test]
@@ -181,7 +187,7 @@ index e69de29..0000000
             &FileOperation::Delete("a/empty.txt".to_owned().into())
         );
         assert!(patchset.patches()[0].patch().hunks().is_empty());
-        assert_eq!(patchset.patches()[0].old_mode(), None);
+        assert_eq!(patchset.patches()[0].old_mode(), Some(&FileMode::Regular));
         assert_eq!(patchset.patches()[0].new_mode(), None);
     }
 
