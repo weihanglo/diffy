@@ -43,6 +43,14 @@ impl<'a, T: ToOwned + ?Sized> Patch<'a, T> {
         }
     }
 
+    pub(crate) fn original_path(&self) -> Option<Cow<'a, T>> {
+        self.original.as_ref().map(|f| f.0.clone())
+    }
+
+    pub(crate) fn modified_path(&self) -> Option<Cow<'a, T>> {
+        self.modified.as_ref().map(|f| f.0.clone())
+    }
+
     /// Return the name of the old file
     pub fn original(&self) -> Option<&T> {
         self.original.as_ref().map(AsRef::as_ref)

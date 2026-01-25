@@ -73,13 +73,13 @@ fn apply_diffy(in_dir: &Path, patch_path: &Path, output_dir: &Path) -> Result<()
         let operation = file_patch.operation().strip_prefix(0);
 
         let (original_name, target_name) = match &operation {
-            FileOperation::Create(path) => (None, path.as_str()),
-            FileOperation::Delete(path) => (Some(path.as_str()), path.as_str()),
+            FileOperation::Create(path) => (None, path.as_ref()),
+            FileOperation::Delete(path) => (Some(path.as_ref()), path.as_ref()),
             FileOperation::Modify { original, modified } => {
-                (Some(original.as_str()), modified.as_str())
+                (Some(original.as_ref()), modified.as_ref())
             }
             FileOperation::Rename { from, to } | FileOperation::Copy { from, to } => {
-                (Some(from.as_str()), to.as_str())
+                (Some(from.as_ref()), to.as_ref())
             }
         };
 

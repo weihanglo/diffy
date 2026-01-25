@@ -11,24 +11,24 @@ mod file_operation {
     #[test]
     fn test_strip_prefix() {
         let op = FileOperation::Modify {
-            original: "a/src/lib.rs".to_owned(),
-            modified: "b/src/lib.rs".to_owned(),
+            original: "a/src/lib.rs".to_owned().into(),
+            modified: "b/src/lib.rs".to_owned().into(),
         };
         let stripped = op.strip_prefix(1);
         assert_eq!(
             stripped,
             FileOperation::Modify {
-                original: "src/lib.rs".to_owned(),
-                modified: "src/lib.rs".to_owned(),
+                original: "src/lib.rs".to_owned().into(),
+                modified: "src/lib.rs".to_owned().into(),
             }
         );
     }
 
     #[test]
     fn test_strip_prefix_no_slash() {
-        let op = FileOperation::Create("file.rs".to_owned());
+        let op = FileOperation::Create("file.rs".to_owned().into());
         let stripped = op.strip_prefix(1);
-        assert_eq!(stripped, FileOperation::Create("file.rs".to_owned()));
+        assert_eq!(stripped, FileOperation::Create("file.rs".to_owned().into()));
     }
 }
 
@@ -57,8 +57,8 @@ diff --git a/file2.rs b/file2.rs
         assert_eq!(
             patchset.patches()[0].operation(),
             &FileOperation::Modify {
-                original: "a/file1.rs".to_owned(),
-                modified: "b/file1.rs".to_owned(),
+                original: "a/file1.rs".to_owned().into(),
+                modified: "b/file1.rs".to_owned().into(),
             }
         );
         assert_eq!(patchset.patches()[0].patch().hunks().len(), 1);
@@ -66,8 +66,8 @@ diff --git a/file2.rs b/file2.rs
         assert_eq!(
             patchset.patches()[1].operation(),
             &FileOperation::Modify {
-                original: "a/file2.rs".to_owned(),
-                modified: "b/file2.rs".to_owned(),
+                original: "a/file2.rs".to_owned().into(),
+                modified: "b/file2.rs".to_owned().into(),
             }
         );
         assert_eq!(patchset.patches()[1].patch().hunks().len(), 1);
@@ -91,8 +91,8 @@ new mode 100755
         assert_eq!(
             patchset.patches()[0].operation(),
             &FileOperation::Modify {
-                original: "a/file.rs".to_owned(),
-                modified: "b/file.rs".to_owned(),
+                original: "a/file.rs".to_owned().into(),
+                modified: "b/file.rs".to_owned().into(),
             }
         );
         assert_eq!(patchset.patches()[0].patch().hunks().len(), 1);
@@ -113,7 +113,7 @@ new file mode 100755
 
         assert_eq!(
             patchset.patches()[0].operation(),
-            &FileOperation::Create("b/new.sh".to_owned())
+            &FileOperation::Create("b/new.sh".to_owned().into())
         );
         assert_eq!(patchset.patches()[0].patch().hunks().len(), 1);
     }
@@ -133,7 +133,7 @@ deleted file mode 100755
 
         assert_eq!(
             patchset.patches()[0].operation(),
-            &FileOperation::Delete("a/old.sh".to_owned())
+            &FileOperation::Delete("a/old.sh".to_owned().into())
         );
         assert_eq!(patchset.patches()[0].patch().hunks().len(), 1);
     }
@@ -150,7 +150,7 @@ index 0000000..e69de29
 
         assert_eq!(
             patchset.patches()[0].operation(),
-            &FileOperation::Create("b/empty.txt".to_owned())
+            &FileOperation::Create("b/empty.txt".to_owned().into())
         );
         assert!(patchset.patches()[0].patch().hunks().is_empty());
     }
@@ -167,7 +167,7 @@ index e69de29..0000000
 
         assert_eq!(
             patchset.patches()[0].operation(),
-            &FileOperation::Delete("a/empty.txt".to_owned())
+            &FileOperation::Delete("a/empty.txt".to_owned().into())
         );
         assert!(patchset.patches()[0].patch().hunks().is_empty());
     }
@@ -186,8 +186,8 @@ rename to new.txt
         assert_eq!(
             patchset.patches()[0].operation(),
             &FileOperation::Rename {
-                from: "old.txt".to_owned(),
-                to: "new.txt".to_owned(),
+                from: "old.txt".to_owned().into(),
+                to: "new.txt".to_owned().into(),
             }
         );
         // Pure rename has no hunks
@@ -208,8 +208,8 @@ copy to copy.txt
         assert_eq!(
             patchset.patches()[0].operation(),
             &FileOperation::Copy {
-                from: "original.txt".to_owned(),
-                to: "copy.txt".to_owned(),
+                from: "original.txt".to_owned().into(),
+                to: "copy.txt".to_owned().into(),
             }
         );
         // Pure copy has no hunks
@@ -235,8 +235,8 @@ rename to new.txt
         assert_eq!(
             patchset.patches()[0].operation(),
             &FileOperation::Rename {
-                from: "old.txt".to_owned(),
-                to: "new.txt".to_owned(),
+                from: "old.txt".to_owned().into(),
+                to: "new.txt".to_owned().into(),
             }
         );
         // Rename with changes has hunks
@@ -263,8 +263,8 @@ copy to copy.txt
         assert_eq!(
             patchset.patches()[0].operation(),
             &FileOperation::Copy {
-                from: "original.txt".to_owned(),
-                to: "copy.txt".to_owned(),
+                from: "original.txt".to_owned().into(),
+                to: "copy.txt".to_owned().into(),
             }
         );
         // Copy with changes has hunks
@@ -289,8 +289,8 @@ rename to renamed.sh
         assert_eq!(
             patchset.patches()[0].operation(),
             &FileOperation::Rename {
-                from: "file.sh".to_owned(),
-                to: "renamed.sh".to_owned(),
+                from: "file.sh".to_owned().into(),
+                to: "renamed.sh".to_owned().into(),
             }
         );
         assert!(patchset.patches()[0].patch().hunks().is_empty());
@@ -327,8 +327,8 @@ diff --git a/file.rs b/file.rs
         assert_eq!(
             patchset.patches()[0].operation(),
             &FileOperation::Modify {
-                original: "a/file.rs".to_owned(),
-                modified: "b/file.rs".to_owned(),
+                original: "a/file.rs".to_owned().into(),
+                modified: "b/file.rs".to_owned().into(),
             }
         );
     }
@@ -347,8 +347,8 @@ new mode 100755
         assert_eq!(
             patchset.patches()[0].operation(),
             &FileOperation::Modify {
-                original: "a/script.sh".to_owned(),
-                modified: "b/script.sh".to_owned(),
+                original: "a/script.sh".to_owned().into(),
+                modified: "b/script.sh".to_owned().into(),
             }
         );
         assert!(patchset.patches()[0].patch().hunks().is_empty());
@@ -373,8 +373,8 @@ new mode 100755
         assert_eq!(
             patchset.patches()[0].operation(),
             &FileOperation::Modify {
-                original: "script.sh".to_owned(),
-                modified: "script.sh".to_owned(),
+                original: "script.sh".to_owned().into(),
+                modified: "script.sh".to_owned().into(),
             }
         );
     }
@@ -391,8 +391,8 @@ new mode 100755
         assert_eq!(
             patchset.patches()[0].operation(),
             &FileOperation::Modify {
-                original: "a/script name.sh".to_owned(),
-                modified: "b/script name.sh".to_owned(),
+                original: "a/script name.sh".to_owned().into(),
+                modified: "b/script name.sh".to_owned().into(),
             }
         );
     }
@@ -410,8 +410,8 @@ new mode 100755
         assert_eq!(
             patchset.patches()[0].operation(),
             &FileOperation::Modify {
-                original: "a/path/to/my b/file.txt".to_owned(),
-                modified: "b/path/to/my b/file.txt".to_owned(),
+                original: "a/path/to/my b/file.txt".to_owned().into(),
+                modified: "b/path/to/my b/file.txt".to_owned().into(),
             }
         );
     }
@@ -428,8 +428,8 @@ new mode 100755
         assert_eq!(
             patchset.patches()[0].operation(),
             &FileOperation::Modify {
-                original: "src/script.sh".to_owned(),
-                modified: "dst/script.sh".to_owned(),
+                original: "src/script.sh".to_owned().into(),
+                modified: "dst/script.sh".to_owned().into(),
             }
         );
     }
@@ -447,8 +447,8 @@ new mode 100755
         assert_eq!(
             patchset.patches()[0].operation(),
             &FileOperation::Modify {
-                original: "src/main/java/file.txt".to_owned(),
-                modified: "target/file.txt".to_owned(),
+                original: "src/main/java/file.txt".to_owned().into(),
+                modified: "target/file.txt".to_owned().into(),
             }
         );
     }
@@ -466,8 +466,8 @@ new mode 100755
         assert_eq!(
             patchset.patches()[0].operation(),
             &FileOperation::Modify {
-                original: "a/file\twith\ttab.sh".to_owned(),
-                modified: "b/file\twith\ttab.sh".to_owned(),
+                original: "a/file\twith\ttab.sh".to_owned().into(),
+                modified: "b/file\twith\ttab.sh".to_owned().into(),
             }
         );
     }
@@ -485,8 +485,8 @@ new mode 100755
         assert_eq!(
             patchset.patches()[0].operation(),
             &FileOperation::Modify {
-                original: "a\t/script.sh".to_owned(),
-                modified: "b/script.sh".to_owned(),
+                original: "a\t/script.sh".to_owned().into(),
+                modified: "b/script.sh".to_owned().into(),
             }
         );
     }
@@ -504,8 +504,8 @@ new mode 100755
         assert_eq!(
             patchset.patches()[0].operation(),
             &FileOperation::Modify {
-                original: "a/script.sh".to_owned(),
-                modified: "b\t/script.sh".to_owned(),
+                original: "a/script.sh".to_owned().into(),
+                modified: "b\t/script.sh".to_owned().into(),
             }
         );
     }
@@ -524,8 +524,8 @@ new mode 100755
         assert_eq!(
             patchset.patches()[0].operation(),
             &FileOperation::Modify {
-                original: "src/foo.rs src/foo.rs".to_owned(),
-                modified: "src/foo.rs src/foo.rs".to_owned(),
+                original: "src/foo.rs src/foo.rs".to_owned().into(),
+                modified: "src/foo.rs src/foo.rs".to_owned().into(),
             }
         );
     }
@@ -543,8 +543,8 @@ new mode 100755
         assert_eq!(
             patchset.patches()[0].operation(),
             &FileOperation::Modify {
-                original: "fofoo/bar.rs".to_owned(),
-                modified: "foo/bar.rs".to_owned(),
+                original: "fofoo/bar.rs".to_owned().into(),
+                modified: "foo/bar.rs".to_owned().into(),
             }
         );
     }
@@ -586,8 +586,8 @@ Binary files a/image.png and b/image.png differ
         assert_eq!(
             patchset.patches()[0].operation(),
             &FileOperation::Modify {
-                original: "a/image.png".to_owned(),
-                modified: "b/image.png".to_owned(),
+                original: "a/image.png".to_owned().into(),
+                modified: "b/image.png".to_owned().into(),
             }
         );
         assert!(patchset.patches()[0].patch().hunks().is_empty());
@@ -609,8 +609,8 @@ index 1234567..89abcdef 100644
         assert_eq!(
             patchset.patches()[0].operation(),
             &FileOperation::Modify {
-                original: "a/file.rs".to_owned(),
-                modified: "b/file.rs".to_owned(),
+                original: "a/file.rs".to_owned().into(),
+                modified: "b/file.rs".to_owned().into(),
             }
         );
     }
@@ -716,8 +716,8 @@ rename to path with spaces/new file.txt
         assert_eq!(
             patchset.patches()[0].operation(),
             &FileOperation::Rename {
-                from: "path with spaces/old file.txt".to_owned(),
-                to: "path with spaces/new file.txt".to_owned(),
+                from: "path with spaces/old file.txt".to_owned().into(),
+                to: "path with spaces/new file.txt".to_owned().into(),
             }
         );
     }
@@ -832,7 +832,7 @@ No patches here
         assert!(patchset.patches()[0].operation().is_create());
         assert_eq!(
             patchset.patches()[0].operation(),
-            &FileOperation::Create("b/new.rs".to_owned())
+            &FileOperation::Create("b/new.rs".to_owned().into())
         );
     }
 
@@ -849,7 +849,7 @@ No patches here
         assert!(patchset.patches()[0].operation().is_delete());
         assert_eq!(
             patchset.patches()[0].operation(),
-            &FileOperation::Delete("a/old.rs".to_owned())
+            &FileOperation::Delete("a/old.rs".to_owned().into())
         );
     }
 
@@ -867,8 +867,8 @@ No patches here
         assert_eq!(
             patchset.patches()[0].operation(),
             &FileOperation::Modify {
-                original: "a/old.rs".to_owned(),
-                modified: "b/new.rs".to_owned(),
+                original: "a/old.rs".to_owned().into(),
+                modified: "b/new.rs".to_owned().into(),
             }
         );
     }
@@ -1018,8 +1018,8 @@ In a hole in the ground there lived a hobbit
         assert_eq!(
             patchset.patches()[0].operation(),
             &FileOperation::Modify {
-                original: "a/file.rs".to_owned(),
-                modified: "a/file.rs".to_owned(),
+                original: "a/file.rs".to_owned().into(),
+                modified: "a/file.rs".to_owned().into(),
             }
         );
     }
@@ -1037,8 +1037,8 @@ In a hole in the ground there lived a hobbit
         assert_eq!(
             patchset.patches()[0].operation(),
             &FileOperation::Modify {
-                original: "b/file.rs".to_owned(),
-                modified: "b/file.rs".to_owned(),
+                original: "b/file.rs".to_owned().into(),
+                modified: "b/file.rs".to_owned().into(),
             }
         );
     }

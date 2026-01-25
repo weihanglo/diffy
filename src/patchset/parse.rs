@@ -55,7 +55,7 @@ fn parse_unidiff(input: &str) -> Result<PatchSet<'_, str>, PatchSetParseError> {
     for patch_str in patch_strs {
         let patch =
             Patch::from_str(patch_str).map_err(|e| PatchSetParseError::new(e.to_string()))?;
-        let operation = extract_file_op_unidiff(patch.original(), patch.modified())?;
+        let operation = extract_file_op_unidiff(patch.original_path(), patch.modified_path())?;
         patches.push(FilePatch::new(operation, patch, None, None));
     }
 
@@ -234,12 +234,13 @@ fn strip_email_signature(input: &str) -> &str {
 }
 
 /// Extracts the file operation from a patch based on its header paths.
-pub fn extract_file_op_unidiff(
-    original: Option<&str>,
-    modified: Option<&str>,
-) -> Result<FileOperation, PatchSetParseError> {
-    let is_create = original == Some(DEV_NULL);
-    let is_delete = modified == Some(DEV_NULL);
+///
+pub fn extract_file_op_unidiff<'a>(
+    original: Option<Cow<'a, str>>,
+    modified: Option<Cow<'a, str>>,
+) -> Result<FileOperation<'a>, PatchSetParseError> {
+    let is_create = original.as_deref() == Some(DEV_NULL);
+    let is_delete = modified.as_deref() == Some(DEV_NULL);
 
     if is_create && is_delete {
         return Err(PatchSetParseError::new(
@@ -250,30 +251,27 @@ pub fn extract_file_op_unidiff(
     if is_delete {
         let path =
             original.ok_or_else(|| PatchSetParseError::new("delete patch has no original path"))?;
-        Ok(FileOperation::Delete(path.to_owned()))
+        Ok(FileOperation::Delete(path))
     } else if is_create {
         let path =
             modified.ok_or_else(|| PatchSetParseError::new("create patch has no modified path"))?;
-        Ok(FileOperation::Create(path.to_owned()))
+        Ok(FileOperation::Create(path))
     } else {
         match (original, modified) {
-            (Some(original), Some(modified)) => Ok(FileOperation::Modify {
-                original: original.to_owned(),
-                modified: modified.to_owned(),
-            }),
+            (Some(original), Some(modified)) => Ok(FileOperation::Modify { original, modified }),
             (None, Some(modified)) => {
                 // No original path, but has modified path.
                 // Observed that GNU patch reads from the modified path in this case.
                 Ok(FileOperation::Modify {
-                    original: modified.to_owned(),
-                    modified: modified.to_owned(),
+                    original: modified.clone(),
+                    modified,
                 })
             }
             (Some(original), None) => {
                 // No modified path, but has original path.
                 Ok(FileOperation::Modify {
-                    original: original.to_owned(),
-                    modified: original.to_owned(),
+                    modified: original.clone(),
+                    original,
                 })
             }
             (None, None) => Err(PatchSetParseError::new("patch has no file path")),
@@ -282,27 +280,27 @@ pub fn extract_file_op_unidiff(
 }
 
 /// Determines the file operation using git headers and patch paths.
-fn extract_file_op_gitdiff(
-    header: &GitHeader<'_>,
-    patch: &Patch<'_, str>,
-) -> Result<FileOperation, PatchSetParseError> {
+fn extract_file_op_gitdiff<'a>(
+    header: &GitHeader<'a>,
+    patch: &Patch<'a, str>,
+) -> Result<FileOperation<'a>, PatchSetParseError> {
     // Git headers are authoritative for rename/copy
     if let (Some(from), Some(to)) = (header.rename_from, header.rename_to) {
         return Ok(FileOperation::Rename {
-            from: from.to_owned(),
-            to: to.to_owned(),
+            from: Cow::Borrowed(from),
+            to: Cow::Borrowed(to),
         });
     }
     if let (Some(from), Some(to)) = (header.copy_from, header.copy_to) {
         return Ok(FileOperation::Copy {
-            from: from.to_owned(),
-            to: to.to_owned(),
+            from: Cow::Borrowed(from),
+            to: Cow::Borrowed(to),
         });
     }
 
-    // Try ---/+++ paths first
+    // Try ---/+++ paths first.
     if patch.original().is_some() || patch.modified().is_some() {
-        return extract_file_op_unidiff(patch.original(), patch.modified());
+        return extract_file_op_unidiff(patch.original_path(), patch.modified_path());
     }
 
     // Fall back to `diff --git <old> <new>` for mode-only and empty file changes.
@@ -311,14 +309,11 @@ fn extract_file_op_gitdiff(
     };
 
     let op = if header.new_file_mode.is_some() {
-        FileOperation::Create(modified.into_owned())
+        FileOperation::Create(modified)
     } else if header.deleted_file_mode.is_some() {
-        FileOperation::Delete(original.into_owned())
+        FileOperation::Delete(original)
     } else {
-        FileOperation::Modify {
-            original: original.into_owned(),
-            modified: modified.into_owned(),
-        }
+        FileOperation::Modify { original, modified }
     };
 
     Ok(op)
