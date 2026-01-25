@@ -252,6 +252,12 @@ fn hunk_lines<'a, T: Text + ?Sized>(
         let line = if line.starts_with("@") {
             break;
         } else if no_newline_context {
+            // After `\ No newline at end of file` on a context line,
+            // only a new hunk header is valid. Any other line means
+            // the hunk should be complete, or it's an error.
+            if hunk_complete {
+                break;
+            }
             return Err(ParsePatchError::new("expected end of hunk"));
         } else if let Some(line) = line.strip_prefix(" ") {
             Line::Context(line)
@@ -388,6 +394,36 @@ index 1234567..89abcdef 100644
 ";
         let patch = parse(s).unwrap();
         assert_eq!(patch.hunks().len(), 1);
+    }
+
+    /// Regression test for parsing UniDiff patches from `git diff` output.
+    ///
+    /// When UniDiff mode splits patches by `---/+++` boundaries, trailing
+    /// `diff --git` lines from the next patch may be included. If the last
+    /// hunk ends with `\ No newline at end of file`, the parser should still
+    /// recognize the hunk as complete and ignore the trailing garbage.
+    ///
+    /// This pattern appears in rust-lang/cargo@b119b891df93f128abef634215cd8f967c3cd120
+    /// where HTML files lost their trailing newlines.
+    #[test]
+    fn no_newline_at_eof_followed_by_trailing_garbage() {
+        // Simulates UniDiff split including next patch's git headers
+        let s = "\
+--- a/file.html
++++ b/file.html
+@@ -1,3 +1,3 @@
+ <div>
+-<p>old</p>
++<p>new</p>
+ </div>
+\\ No newline at end of file
+diff --git a/other.html b/other.html
+index 1234567..89abcdef 100644
+";
+        let patch = parse(s).unwrap();
+        assert_eq!(patch.hunks().len(), 1);
+        assert_eq!(patch.hunks()[0].old_range().len(), 3);
+        assert_eq!(patch.hunks()[0].new_range().len(), 3);
     }
 
     #[test]
