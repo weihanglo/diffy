@@ -7,7 +7,9 @@ mod parse;
 #[cfg(test)]
 mod tests;
 
-use crate::{ParsePatchError, Patch};
+use crate::Patch;
+use std::borrow::Cow;
+use std::fmt;
 
 /// Patch format to parse.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,7 +80,7 @@ impl<'a> PatchSet<'a, str> {
     /// let patchset = PatchSet::parse(s, ParseMode::UniDiff).unwrap();
     /// assert_eq!(patchset.patches().len(), 2);
     /// ```
-    pub fn parse(s: &'a str, mode: ParseMode) -> Result<PatchSet<'a, str>, ParsePatchError> {
+    pub fn parse(s: &'a str, mode: ParseMode) -> Result<PatchSet<'a, str>, PatchSetParseError> {
         parse::parse(s, mode)
     }
 }
@@ -141,7 +143,7 @@ pub enum FileMode {
 }
 
 impl std::str::FromStr for FileMode {
-    type Err = ParsePatchError;
+    type Err = PatchSetParseError;
 
     fn from_str(mode: &str) -> Result<Self, Self::Err> {
         match mode {
@@ -149,7 +151,9 @@ impl std::str::FromStr for FileMode {
             "100755" => Ok(Self::Executable),
             "120000" => Ok(Self::Symlink),
             "160000" => Ok(Self::Gitlink),
-            _ => Err(ParsePatchError::new(format!("invalid file mode: {mode}"))),
+            _ => Err(PatchSetParseError::new(format!(
+                "invalid file mode: {mode}"
+            ))),
         }
     }
 }
@@ -310,3 +314,21 @@ impl FileOperation {
         matches!(self, FileOperation::Copy { .. })
     }
 }
+
+/// An error returned when parsing a [`PatchSet`] fails.
+#[derive(Debug)]
+pub struct PatchSetParseError(Cow<'static, str>);
+
+impl PatchSetParseError {
+    pub(crate) fn new<E: Into<Cow<'static, str>>>(e: E) -> Self {
+        Self(e.into())
+    }
+}
+
+impl fmt::Display for PatchSetParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "error parsing patchset: {}", self.0)
+    }
+}
+
+impl std::error::Error for PatchSetParseError {}
