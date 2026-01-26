@@ -141,19 +141,15 @@ fn junk_between_hunks() {
     Case::gnu_patch("junk_between_hunks").run();
 }
 
-// Patches with headers but no hunks.
+// Patch with ---/+++ headers but no @@ hunks.
 //
-// Platform compatibility:
+// - GNU patch: rejects ("Only garbage was found in the patch input")
+// - diffy: succeeds, parses as 1 patch with 0 hunks
 //
-// - GNU patch 2.8 (Linux): ❌ Rejects with "Only garbage was found in the patch input"
-// - Apple patch 2.0 (macOS/BSD): ❌ Rejects with "I can't seem to find a patch in there anywhere"
-// - diffy: ✅ Accepts and parses (0 hunks)
-//
-// diffy's permissiveness is needed for GitDiff mode support where empty files have no hunks
+// diffy allows 0-hunk patches for GitDiff mode where empty/binary files have no hunks.
 #[test]
-fn fail_no_hunk() {
-    // diffy succeeds (permissive), GNU patch rejects
-    Case::gnu_patch("fail_no_hunk")
+fn no_hunk() {
+    Case::gnu_patch("no_hunk")
         .expect_success(true)
         .expect_compat(false)
         .run();
