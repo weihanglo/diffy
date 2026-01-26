@@ -215,3 +215,25 @@ fn path_ambiguous_suffix() {
     // creates `src/foo.rs src/foo.rs src/foo.rs src/foo.rs` - verify matches git.
     run_case(&case_dir("path_ambiguous_suffix"), CaseConfig::with_p1()).unwrap();
 }
+
+// Single-file patch with junk between hunks.
+//
+// git apply error: "patch fragment without header at line N"
+//
+// Hunks within a single file must be contiguous.
+#[test]
+fn fail_junk_between_hunks() {
+    run_case(&case_dir("fail_junk_between_hunks"), CaseConfig::default()).unwrap_err();
+}
+
+// Multi-file patch with junk/preamble text between different files.
+//
+// git apply behavior: Ignores content between `diff --git` boundaries.
+// In GitDiff mode, splitting occurs at `diff --git`, so junk between
+// files becomes trailing content of the previous chunk (harmless).
+//
+// This is different from junk between HUNKS of the same file (which fails).
+#[test]
+fn junk_between_files() {
+    run_case(&case_dir("junk_between_files"), CaseConfig::with_p1()).unwrap();
+}

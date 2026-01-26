@@ -198,6 +198,31 @@ fn preamble_git_headers() {
     run_case(&case_dir("preamble_git_headers"), CaseConfig::default()).unwrap();
 }
 
+// Multi-file patch with junk/preamble text between different files.
+//
+// GNU patch behavior: Treats content before `---` as "text leading up to"
+// the next patch (preamble), which is silently ignored.
+//
+// Verified with:
+// ```
+// patch -p0 --dry-run --verbose < multi-file-junk.patch
+// ```
+// Output shows:
+// ```
+// Hmm...  The next patch looks like a unified diff to me...
+// The text leading up to this was:
+// --------------------------
+// |JUNK BETWEEN FILES!!!!
+// |This preamble text should be ignored
+// ...
+// ```
+//
+// This is different from junk between HUNKS of the same file (which fails).
+#[test]
+fn junk_between_files() {
+    run_case(&case_dir("junk_between_files"), CaseConfig::default()).unwrap();
+}
+
 #[test]
 fn trailing_signature() {
     run_case(&case_dir("trailing_signature"), CaseConfig::default()).unwrap();
@@ -233,6 +258,19 @@ fn fail_hunk_not_found() {
 #[test]
 fn fail_truncated_file() {
     run_case(&case_dir("fail_truncated_file"), CaseConfig::default()).unwrap_err();
+}
+
+// Single-file patch with junk between hunks.
+//
+// GNU patch behavior: Treats junk as preamble to a NEW patch, then prompts
+// "File to patch:" because no `---` header follows the junk.
+//
+// git apply behavior: "patch fragment without header at line N"
+//
+// Both tools reject this - hunks within a single file must be contiguous.
+#[test]
+fn fail_junk_between_hunks() {
+    run_case(&case_dir("fail_junk_between_hunks"), CaseConfig::default()).unwrap();
 }
 
 // Patches with headers but no hunks.
