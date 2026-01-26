@@ -15,25 +15,8 @@ use std::process::Stdio;
 use std::sync::Once;
 
 use crate::common;
+use crate::common::CaseConfig;
 use crate::common::TestError;
-
-/// Configuration for a git test case.
-#[derive(Default)]
-struct CaseConfig {
-    /// Strip level for path prefixes (default: 1).
-    strip_level: u32,
-}
-
-impl CaseConfig {
-    fn new() -> Self {
-        Self { strip_level: 1 }
-    }
-
-    fn strip(mut self, level: u32) -> Self {
-        self.strip_level = level;
-        self
-    }
-}
 
 /// Run `git apply` to apply a patch.
 fn git_apply(repo: &Path, patch: &str, strip_level: u32) -> Result<(), String> {
@@ -112,7 +95,7 @@ fn run_case(case_dir: &Path, config: CaseConfig) -> Result<(), TestError> {
         &patch,
         &diffy_output,
         diffy::patchset::ParseMode::GitDiff,
-        config.strip_level as usize,
+        config.strip_level,
     );
 
     // In CI mode, also verify git apply behavior matches
@@ -148,34 +131,34 @@ fn run_case(case_dir: &Path, config: CaseConfig) -> Result<(), TestError> {
 
 #[test]
 fn path_no_prefix() {
-    run_case(&case_dir("path_no_prefix"), CaseConfig::new().strip(0)).unwrap();
+    run_case(&case_dir("path_no_prefix"), CaseConfig::default()).unwrap();
 }
 
 #[test]
 fn path_quoted_escapes() {
-    run_case(&case_dir("path_quoted_escapes"), CaseConfig::new()).unwrap();
+    run_case(&case_dir("path_quoted_escapes"), CaseConfig::with_p1()).unwrap();
 }
 
 #[test]
 fn path_with_spaces() {
-    run_case(&case_dir("path_with_spaces"), CaseConfig::new()).unwrap();
+    run_case(&case_dir("path_with_spaces"), CaseConfig::with_p1()).unwrap();
 }
 
 #[test]
 fn path_containing_space_b() {
-    run_case(&case_dir("path_containing_space_b"), CaseConfig::new()).unwrap();
+    run_case(&case_dir("path_containing_space_b"), CaseConfig::with_p1()).unwrap();
 }
 
 #[test]
 fn format_patch_preamble() {
     // Ambiguous: where does preamble end? First `\n---\n` - verify matches git
-    run_case(&case_dir("format_patch_preamble"), CaseConfig::new()).unwrap();
+    run_case(&case_dir("format_patch_preamble"), CaseConfig::with_p1()).unwrap();
 }
 
 #[test]
 fn format_patch_diff_in_message() {
     // `diff --git` in commit message must NOT trigger early parsing
-    run_case(&case_dir("format_patch_diff_in_message"), CaseConfig::new()).unwrap();
+    run_case(&case_dir("format_patch_diff_in_message"), CaseConfig::with_p1()).unwrap();
 }
 
 #[test]
@@ -183,7 +166,7 @@ fn format_patch_multiple_separators() {
     // Git uses first `\n---\n` as separator (observed git mailinfo behavior)
     run_case(
         &case_dir("format_patch_multiple_separators"),
-        CaseConfig::new(),
+        CaseConfig::with_p1(),
     )
     .unwrap();
 }
@@ -191,7 +174,7 @@ fn format_patch_multiple_separators() {
 #[test]
 fn format_patch_signature() {
     // Ambiguous: `\n-- \n` could appear in patch content - verify matches git
-    run_case(&case_dir("format_patch_signature"), CaseConfig::new()).unwrap();
+    run_case(&case_dir("format_patch_signature"), CaseConfig::with_p1()).unwrap();
 }
 
 #[test]
@@ -199,5 +182,5 @@ fn path_ambiguous_suffix() {
     // Multiple valid splits in `diff --git` line; algorithm picks longest common suffix.
     // Tests the pathological case from parse.rs comments where custom prefix
     // creates `src/foo.rs src/foo.rs src/foo.rs src/foo.rs` - verify matches git.
-    run_case(&case_dir("path_ambiguous_suffix"), CaseConfig::new()).unwrap();
+    run_case(&case_dir("path_ambiguous_suffix"), CaseConfig::with_p1()).unwrap();
 }

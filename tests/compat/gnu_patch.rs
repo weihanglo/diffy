@@ -14,14 +14,20 @@ use std::sync::Once;
 use diffy::patchset::ParseMode;
 
 use crate::common;
+use crate::common::CaseConfig;
 use crate::common::TestError;
 
-fn apply_gnu_patch(in_dir: &Path, patch_path: &Path, output_dir: &Path) -> Result<(), String> {
+fn apply_gnu_patch(
+    in_dir: &Path,
+    patch_path: &Path,
+    output_dir: &Path,
+    strip: u32,
+) -> Result<(), String> {
     common::copy_input_files(in_dir, output_dir, &["patch"]);
 
     // Apply patch with GNU patch
     let output = Command::new("patch")
-        .arg("-p0")
+        .arg(format!("-p{strip}"))
         .arg("--force")
         .arg("--batch")
         .arg("--input")
@@ -41,8 +47,8 @@ fn apply_gnu_patch(in_dir: &Path, patch_path: &Path, output_dir: &Path) -> Resul
     Ok(())
 }
 
-/// Run a patch behavior test case.
-fn run_case_impl(case_dir: &Path, force_skip_gnu_check: bool) -> Result<(), TestError> {
+/// Run a patch test case, comparing with GNU patch.
+fn run_case(case_dir: &Path, cfg: CaseConfig) -> Result<(), TestError> {
     let in_dir = case_dir.join("in");
     let patch_path = in_dir.join("foo.patch");
     let patch = fs::read_to_string(&patch_path).unwrap();
@@ -55,16 +61,22 @@ fn run_case_impl(case_dir: &Path, force_skip_gnu_check: bool) -> Result<(), Test
     common::create_output_dir(&diffy_output);
 
     // Apply with diffy
-    let diffy_result = common::apply_diffy(&in_dir, &patch, &diffy_output, ParseMode::UniDiff, 0);
+    let diffy_result = common::apply_diffy(
+        &in_dir,
+        &patch,
+        &diffy_output,
+        ParseMode::UniDiff,
+        cfg.strip_level,
+    );
 
     // In CI mode, also verify GNU patch behavior matches (unless explicitly skipped)
-    if common::is_ci() && !force_skip_gnu_check {
+    if common::is_ci() && !cfg.skip_compat_check {
         print_patch_version();
 
         let gnu_output = temp_base.join(format!("gnu-{case_name}-gnu"));
         common::create_output_dir(&gnu_output);
 
-        let gnu_result = apply_gnu_patch(&in_dir, &patch_path, &gnu_output);
+        let gnu_result = apply_gnu_patch(&in_dir, &patch_path, &gnu_output, cfg.strip_level);
 
         if diffy_result.is_ok() && gnu_result.is_ok() {
             snapbox::assert_subset_eq(&gnu_output, &diffy_output);
@@ -82,16 +94,6 @@ fn run_case_impl(case_dir: &Path, force_skip_gnu_check: bool) -> Result<(), Test
     snapbox::assert_subset_eq(case_dir.join("out"), &diffy_output);
 
     Ok(())
-}
-
-/// Run a patch test case, comparing with GNU patch.
-fn run_case(case_dir: &Path) -> Result<(), TestError> {
-    run_case_impl(case_dir, false)
-}
-
-/// Run a patch test case for diffy only, skipping GNU patch comparison.
-fn run_case_diffy_only(case_dir: &Path) -> Result<(), TestError> {
-    run_case_impl(case_dir, true)
 }
 
 fn case_dir(name: &str) -> PathBuf {
@@ -126,22 +128,22 @@ fn print_patch_version() {
 
 #[test]
 fn create_file() {
-    run_case(&case_dir("create_file")).unwrap();
+    run_case(&case_dir("create_file"), CaseConfig::default()).unwrap();
 }
 
 #[test]
 fn reversed_header_order() {
-    run_case(&case_dir("reversed_header_order")).unwrap();
+    run_case(&case_dir("reversed_header_order"), CaseConfig::default()).unwrap();
 }
 
 #[test]
 fn missing_plus_header() {
-    run_case(&case_dir("missing_plus_header")).unwrap();
+    run_case(&case_dir("missing_plus_header"), CaseConfig::default()).unwrap();
 }
 
 #[test]
 fn missing_minus_header() {
-    run_case(&case_dir("missing_minus_header")).unwrap();
+    run_case(&case_dir("missing_minus_header"), CaseConfig::default()).unwrap();
 }
 
 // Empty file creation using unified diff format with empty hunk.
@@ -153,7 +155,11 @@ fn missing_minus_header() {
 #[test]
 #[ignore = "implementation differences"]
 fn create_empty_file_unidiff() {
-    run_case(&case_dir("create_empty_file_unidiff")).unwrap();
+    run_case(
+        &case_dir("create_empty_file_unidiff"),
+        CaseConfig::default(),
+    )
+    .unwrap();
 }
 
 // Empty file creation using git diff format (no unified diff headers/hunks).
@@ -166,37 +172,41 @@ fn create_empty_file_unidiff() {
 #[test]
 #[ignore = "implementation differences"]
 fn create_empty_file_gitdiff() {
-    run_case(&case_dir("create_empty_file_gitdiff")).unwrap();
+    run_case(
+        &case_dir("create_empty_file_gitdiff"),
+        CaseConfig::default(),
+    )
+    .unwrap();
 }
 
 #[test]
 fn delete_file() {
-    run_case(&case_dir("delete_file")).unwrap();
+    run_case(&case_dir("delete_file"), CaseConfig::default()).unwrap();
 }
 
 #[test]
 fn preamble_git_headers() {
-    run_case(&case_dir("preamble_git_headers")).unwrap();
+    run_case(&case_dir("preamble_git_headers"), CaseConfig::default()).unwrap();
 }
 
 #[test]
 fn trailing_signature() {
-    run_case(&case_dir("trailing_signature")).unwrap();
+    run_case(&case_dir("trailing_signature"), CaseConfig::default()).unwrap();
 }
 
 #[test]
 fn fail_context_mismatch() {
-    run_case(&case_dir("fail_context_mismatch")).unwrap_err();
+    run_case(&case_dir("fail_context_mismatch"), CaseConfig::default()).unwrap_err();
 }
 
 #[test]
 fn fail_hunk_not_found() {
-    run_case(&case_dir("fail_hunk_not_found")).unwrap_err();
+    run_case(&case_dir("fail_hunk_not_found"), CaseConfig::default()).unwrap_err();
 }
 
 #[test]
 fn fail_truncated_file() {
-    run_case(&case_dir("fail_truncated_file")).unwrap_err();
+    run_case(&case_dir("fail_truncated_file"), CaseConfig::default()).unwrap_err();
 }
 
 // Patches with headers but no hunks.
@@ -211,5 +221,9 @@ fn fail_truncated_file() {
 // diffy's permissiveness is needed for GitDiff mode support where empty files have no hunks
 #[test]
 fn fail_no_hunk() {
-    run_case_diffy_only(&case_dir("fail_no_hunk")).unwrap();
+    run_case(
+        &case_dir("fail_no_hunk"),
+        CaseConfig::default().skip_compat_check(true),
+    )
+    .unwrap();
 }

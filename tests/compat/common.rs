@@ -1,9 +1,42 @@
 //! Common utilities for compat tests.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 
-use diffy::patchset::{FileOperation, ParseMode, PatchSet, PatchSetParseError};
+use diffy::patchset::FileOperation;
+use diffy::patchset::ParseMode;
+use diffy::patchset::PatchSet;
+use diffy::patchset::PatchSetParseError;
+
+/// Configuration for a test case.
+#[derive(Default)]
+pub struct CaseConfig {
+    /// Strip level for path prefixes
+    pub strip_level: u32,
+    /// Skip checking compatibility with external tools
+    pub skip_compat_check: bool,
+}
+
+impl CaseConfig {
+    pub fn with_p1() -> Self {
+        Self {
+            strip_level: 1,
+            ..Default::default()
+        }
+    }
+
+    #[expect(dead_code)]
+    pub fn strip(mut self, level: u32) -> Self {
+        self.strip_level = level;
+        self
+    }
+
+    pub fn skip_compat_check(mut self, skip: bool) -> Self {
+        self.skip_compat_check = skip;
+        self
+    }
+}
 
 /// Error type for compat tests.
 #[derive(Debug)]
@@ -74,12 +107,12 @@ pub fn apply_diffy(
     patch: &str,
     output_dir: &Path,
     mode: ParseMode,
-    strip_prefix: usize,
+    strip_prefix: u32,
 ) -> Result<(), TestError> {
     let patchset = PatchSet::parse(patch, mode).map_err(TestError::Parse)?;
 
     for file_patch in patchset.iter() {
-        let operation = file_patch.operation().strip_prefix(strip_prefix);
+        let operation = file_patch.operation().strip_prefix(strip_prefix as usize);
 
         let (original_name, target_name) = match &operation {
             FileOperation::Create(path) => (None, path.as_ref()),
