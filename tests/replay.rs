@@ -255,39 +255,31 @@ fn process_commit(
 
     // Verify we parsed the same number of patches as git reports files changed.
     // This catches cases where patches are silently skipped.
-    let expected_file_count = if mode == TestMode::UniDiff {
-        // In UniDiff mode,
-        //
-        // we need to filter out empty file changes,
-        // because they have no hunks and no ---/+++ headers
-        // and is not really a valid unidiff format (though diffy accepts them)
-        //
-        // Funny enough, we added an empty file in 51944073b5f813ef4,
-        // (tests/compat/gnu_patch/delete_file/out/file.txt)
-        // and it captured UniDiff mode not supporting empty files git headers.
-        let numstat_output = git(repo, &["diff", "--numstat", "--no-renames", parent, child]);
-        numstat_output
-            .lines()
-            .filter(|l| !l.is_empty())
-            .filter(|line| {
-                // In UniDiff mode, `diff` output may omit `---/+++` and hunks
-                // for changes we intentionally do not support.
-                //
-                // `--numstat` format:
-                //
-                // - `added\tdeleted\tpath`
-                // - `-\t-\tpath` for binary
-                // - `0\t0\tpath` for empty/no-content changes
-                //
-                // We exclude these unsupported cases so `expected_file_count` matches what
-                // UniDiff parsing can actually produce.
-                !line.starts_with("0\t0\t") && !line.starts_with("-\t-\t")
-            })
-            .count()
-    } else {
-        let name_status_output = git(repo, &["diff", "--name-status", parent, child]);
-        name_status_output.lines().filter(|l| !l.is_empty()).count()
+    //
+    // `--numstat` format:
+    // - `added\tdeleted\tpath` for text files
+    // - `-\t-\tpath` for binary files
+    // - `0\t0\tpath` for empty/no-content changes
+    let numstat_output = match mode {
+        TestMode::UniDiff => git(repo, &["diff", "--numstat", "--no-renames", parent, child]),
+        TestMode::GitDiff => git(repo, &["diff", "--numstat", parent, child]),
     };
+    let expected_file_count = numstat_output
+        .lines()
+        .filter(|l| !l.is_empty())
+        .filter(|line| {
+            // Binary files (`-\t-\t`) are skipped in both modes
+            if line.starts_with("-\t-\t") {
+                return false;
+            }
+            // In UniDiff mode, also exclude empty/no-content changes (`0\t0\t`)
+            // because they have no hunks and no ---/+++ headers
+            if mode == TestMode::UniDiff && line.starts_with("0\t0\t") {
+                return false;
+            }
+            true
+        })
+        .count();
 
     if patchset.len() != expected_file_count {
         let n = patchset.len();

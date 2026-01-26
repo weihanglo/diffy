@@ -592,7 +592,6 @@ new mode 100755
 
     #[test]
     fn binary_file_modify() {
-        // Standard binary diff format for modification
         let content = "\
 diff --git a/image.png b/image.png
 index 1234567..89abcdef 100644
@@ -600,17 +599,8 @@ Binary files a/image.png and b/image.png differ
 ";
         let patchset = PatchSet::parse(content, ParseOptions::gitdiff()).unwrap();
 
-        // Current behavior: parsed as 1 file patch with 0 hunks
-        // TODO(binary-skip): should be skipped, assert patchset.is_empty()
-        assert_eq!(patchset.len(), 1);
-        assert_eq!(
-            patchset.patches()[0].operation(),
-            &FileOperation::Modify {
-                original: "a/image.png".to_owned().into(),
-                modified: "b/image.png".to_owned().into(),
-            }
-        );
-        assert!(patchset.patches()[0].patch().hunks().is_empty());
+        // Binary diffs are skipped by default
+        assert!(patchset.is_empty());
     }
 
     #[test]
@@ -624,14 +614,8 @@ Binary files /dev/null and b/binary.bin differ
 ";
         let patchset = PatchSet::parse(content, ParseOptions::gitdiff()).unwrap();
 
-        // Current behavior: parsed as Create with 0 hunks
-        // TODO(binary-skip): should be skipped, assert patchset.is_empty()
-        assert_eq!(patchset.len(), 1);
-        assert_eq!(
-            patchset.patches()[0].operation(),
-            &FileOperation::Create("b/binary.bin".to_owned().into()),
-        );
-        assert!(patchset.patches()[0].patch().hunks().is_empty());
+        // Binary diffs are skipped by default
+        assert!(patchset.is_empty());
     }
 
     #[test]
@@ -645,14 +629,8 @@ Binary files a/binary.bin and /dev/null differ
 ";
         let patchset = PatchSet::parse(content, ParseOptions::gitdiff()).unwrap();
 
-        // Current behavior: parsed as Delete with 0 hunks
-        // TODO(binary-skip): should be skipped, assert patchset.is_empty()
-        assert_eq!(patchset.len(), 1);
-        assert_eq!(
-            patchset.patches()[0].operation(),
-            &FileOperation::Delete("a/binary.bin".to_owned().into()),
-        );
-        assert!(patchset.patches()[0].patch().hunks().is_empty());
+        // Binary diffs are skipped by default
+        assert!(patchset.is_empty());
     }
 
     #[test]
@@ -672,15 +650,8 @@ KcmV+b0RR6000031
 ";
         let patchset = PatchSet::parse(content, ParseOptions::gitdiff()).unwrap();
 
-        // Current behavior: parsed as Create with 0 hunks
-        // The base85 content is not parsed as hunks
-        // TODO(binary-skip): should be skipped, assert patchset.is_empty()
-        assert_eq!(patchset.len(), 1);
-        assert_eq!(
-            patchset.patches()[0].operation(),
-            &FileOperation::Create("b/binary.bin".to_owned().into()),
-        );
-        assert!(patchset.patches()[0].patch().hunks().is_empty());
+        // GIT binary patch format is also skipped
+        assert!(patchset.is_empty());
     }
 
     #[test]
@@ -700,24 +671,11 @@ index c182a93..a39caff 100644
 ";
         let patchset = PatchSet::parse(content, ParseOptions::gitdiff()).unwrap();
 
-        // Current behavior: both patches are parsed
-        // TODO(binary-skip): only text patch should remain, assert_eq!(patchset.len(), 1)
-        assert_eq!(patchset.len(), 2);
-
-        // First is binary (0 hunks)
-        assert!(patchset.patches()[0].patch().hunks().is_empty());
+        // Only text patch remains, binary is skipped
+        assert_eq!(patchset.len(), 1);
+        assert_eq!(patchset.patches()[0].patch().hunks().len(), 1);
         assert_eq!(
             patchset.patches()[0].operation(),
-            &FileOperation::Modify {
-                original: "a/image.png".to_owned().into(),
-                modified: "b/image.png".to_owned().into(),
-            }
-        );
-
-        // Second is text (1 hunk)
-        assert_eq!(patchset.patches()[1].patch().hunks().len(), 1);
-        assert_eq!(
-            patchset.patches()[1].operation(),
             &FileOperation::Modify {
                 original: "a/text.txt".to_owned().into(),
                 modified: "b/text.txt".to_owned().into(),
@@ -740,15 +698,9 @@ Binary files a/binary.bin and b/binary.bin differ
 ";
         let patchset = PatchSet::parse(content, ParseOptions::gitdiff()).unwrap();
 
-        // Current behavior: both patches are parsed
-        // TODO(binary-skip): only text patch should remain, assert_eq!(patchset.len(), 1)
-        assert_eq!(patchset.len(), 2);
-
-        // First is text (1 hunk)
+        // Only text patch remains, binary is skipped
+        assert_eq!(patchset.len(), 1);
         assert_eq!(patchset.patches()[0].patch().hunks().len(), 1);
-
-        // Second is binary (0 hunks)
-        assert!(patchset.patches()[1].patch().hunks().is_empty());
     }
 
     #[test]
@@ -766,11 +718,41 @@ Binary files /dev/null and b/b.png differ
 ";
         let patchset = PatchSet::parse(content, ParseOptions::gitdiff()).unwrap();
 
-        // Current behavior: both binary patches are parsed
-        // TODO(binary-skip): should be empty, assert patchset.is_empty()
-        assert_eq!(patchset.len(), 2);
-        assert!(patchset.patches()[0].patch().hunks().is_empty());
-        assert!(patchset.patches()[1].patch().hunks().is_empty());
+        // All binary, so result is empty
+        assert!(patchset.is_empty());
+    }
+
+    #[test]
+    fn binary_fail_on_binary() {
+        // Test fail_on_binary option
+        let content = "\
+diff --git a/image.png b/image.png
+index 1234567..89abcdef 100644
+Binary files a/image.png and b/image.png differ
+";
+        let result = PatchSet::parse(content, ParseOptions::gitdiff().fail_on_binary());
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("binary"));
+    }
+
+    #[test]
+    fn binary_fail_on_binary_mixed() {
+        // fail_on_binary should fail even if there are text patches
+        let content = "\
+diff --git a/text.txt b/text.txt
+--- a/text.txt
++++ b/text.txt
+@@ -1 +1 @@
+-old
++new
+diff --git a/binary.bin b/binary.bin
+Binary files a/binary.bin and b/binary.bin differ
+";
+        let result = PatchSet::parse(content, ParseOptions::gitdiff().fail_on_binary());
+
+        assert!(result.is_err());
     }
 
     #[test]

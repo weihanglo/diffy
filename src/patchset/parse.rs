@@ -2,6 +2,7 @@
 
 use std::borrow::Cow;
 
+use super::Binary;
 use super::FileMode;
 use super::FileOperation;
 use super::FilePatch;
@@ -27,18 +28,38 @@ const EMAIL_PREAMBLE_SEPARATOR: &str = "\n---\n";
 /// Parse a multi-file patch.
 pub fn parse(input: &str, opts: ParseOptions) -> Result<PatchSet<'_, str>, PatchSetParseError> {
     match opts.format {
-        Format::GitDiff => parse_gitdiff(input),
+        Format::GitDiff => parse_gitdiff(input, &opts),
         Format::UniDiff => parse_unidiff(input),
     }
 }
 
-fn parse_gitdiff(input: &str) -> Result<PatchSet<'_, str>, PatchSetParseError> {
+fn parse_gitdiff<'a>(
+    input: &'a str,
+    opts: &ParseOptions,
+) -> Result<PatchSet<'a, str>, PatchSetParseError> {
     // Strip email preamble to avoid false `diff --git` matches in commit messages.
     let input = strip_email_preamble(input);
 
     let mut patches = Vec::new();
+    let mut found_any = false;
+
     for raw in split_patches_gitdiff(input) {
+        found_any = true;
         let header = GitHeader::parse(raw.header);
+
+        // Handle binary diffs based on options
+        if header.is_binary {
+            match opts.binary {
+                Binary::Skip => continue,
+                Binary::Fail => {
+                    let path = header.diff_git_line.unwrap_or("<unknown>");
+                    return Err(PatchSetParseError::new(format!(
+                        "binary diff not supported: {path}"
+                    )));
+                }
+            }
+        }
+
         let patch =
             Patch::from_str(raw.patch).map_err(|e| PatchSetParseError::new(e.to_string()))?;
         let operation = extract_file_op_gitdiff(&header, &patch)?;
@@ -55,7 +76,9 @@ fn parse_gitdiff(input: &str) -> Result<PatchSet<'_, str>, PatchSetParseError> {
         patches.push(FilePatch::new(operation, patch, old_mode, new_mode));
     }
 
-    if patches.is_empty() {
+    // Only error if input had no patches at all.
+    // Empty result is OK if all patches were binary and skipped.
+    if !found_any {
         return Err(PatchSetParseError::new("no valid patches found"));
     }
 
@@ -558,6 +581,32 @@ struct GitHeader<'a> {
     new_file_mode: Option<&'a str>,
     /// File mode from `deleted file mode <mode>`.
     deleted_file_mode: Option<&'a str>,
+    /// Whether this is a binary file diff.
+    ///
+    /// Observed git diff output patterns:
+    ///
+    /// 1. `git diff` without `--binary`:
+    ///    ```text
+    ///    diff --git a/image.png b/image.png
+    ///    new file mode 100644
+    ///    index 0000000..7c4530c
+    ///    Binary files /dev/null and b/image.png differ
+    ///    ```
+    ///
+    /// 2. `git diff --binary`:
+    ///    ```text
+    ///    diff --git a/image.png b/image.png
+    ///    new file mode 100644
+    ///    index 0000000000000000000000000000000000000000..7c4530ccf8ce9bf6926f9c86633cf47cdc31ee58
+    ///    GIT binary patch
+    ///    literal 67
+    ///    zcmV-J0KET+P)<h;3K|Lk000e1NJLTq00031000391^@s69~H!j0000ANkl<Zc${PS
+    ///    Z4*&oG0RROU*iHZd002ovPDHLkV1i)*3{U_7
+    ///
+    ///    literal 0
+    ///    KcmV+b0RR6000031
+    ///    ```
+    is_binary: bool,
 }
 
 impl<'a> GitHeader<'a> {
@@ -584,6 +633,8 @@ impl<'a> GitHeader<'a> {
                 header.new_file_mode = Some(mode);
             } else if let Some(mode) = line.strip_prefix("deleted file mode ") {
                 header.deleted_file_mode = Some(mode);
+            } else if line.starts_with("Binary files ") || line.starts_with("GIT binary patch") {
+                header.is_binary = true;
             }
             // Ignored: similarity index, dissimilarity index, index
         }
