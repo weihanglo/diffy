@@ -75,13 +75,13 @@ fn path_ambiguous_suffix() {
 
 // Single-file patch with junk between hunks.
 //
-// git apply error: "patch fragment without header at line N"
-//
-// Hunks within a single file must be contiguous.
+// - git apply: errors ("patch fragment without header")
+// - diffy: succeeds, ignores trailing junk (matches GNU patch behavior)
 #[test]
-fn fail_junk_between_hunks() {
-    Case::git("fail_junk_between_hunks")
-        .expect_success(false)
+fn junk_between_hunks() {
+    Case::git("junk_between_hunks")
+        .strip(1)
+        .expect_compat(false)
         .run();
 }
 
