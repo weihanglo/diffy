@@ -815,15 +815,21 @@ It should be ignored
 
     #[test]
     fn empty_content() {
-        let patchset = PatchSet::parse("", ParseMode::UniDiff).unwrap();
-        assert_eq!(patchset.len(), 0);
+        let err = PatchSet::parse("", ParseMode::UniDiff).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "error parsing patchset: no valid patches found"
+        );
     }
 
     #[test]
     fn not_a_patch() {
         let content = "Some random text\nNo patches here\n";
-        let patchset = PatchSet::parse(content, ParseMode::UniDiff).unwrap();
-        assert_eq!(patchset.len(), 0);
+        let err = PatchSet::parse(content, ParseMode::UniDiff).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "error parsing patchset: no valid patches found"
+        );
     }
 
     #[test]
@@ -834,8 +840,11 @@ It should be ignored
 Some random text
 No patches here
 ";
-        let patchset = PatchSet::parse(content, ParseMode::UniDiff).unwrap();
-        assert_eq!(patchset.len(), 0);
+        let err = PatchSet::parse(content, ParseMode::UniDiff).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "error parsing patchset: no valid patches found"
+        );
     }
 
     #[test]
@@ -1072,7 +1081,10 @@ In a hole in the ground there lived a hobbit
 -old
 +new
 ";
-        let patchset = PatchSet::parse(content, ParseMode::UniDiff).unwrap();
-        assert_eq!(patchset.len(), 0);
+        let err = PatchSet::parse(content, ParseMode::UniDiff).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "error parsing patchset: no valid patches found"
+        );
     }
 }

@@ -36,22 +36,23 @@ fn missing_minus_header() {
 // - GNU patch 2.8 (Linux): ❌ Rejects as "malformed patch at line 3"
 // - diffy: ✅ Accepts (with our current implementation)
 #[test]
-#[ignore = "implementation differences"]
 fn create_empty_file_unidiff() {
-    Case::gnu_patch("create_empty_file_unidiff").run();
+    Case::gnu_patch("create_empty_file_unidiff")
+        .expect_compat(false)
+        .run();
 }
 
 // Empty file creation using git diff format (no unified diff headers/hunks).
 //
-// Platform compatibility:
-//
-// - GNU patch 2.8 (Linux): ✅ Accepts with `-p1`, creates empty file (0 bytes)
-// - Apple patch 2.0 (macOS/BSD): ❌ Rejects ("can't find patch")
-// - diffy: ❌ UniDiff mode doesn't support for empty files
+// - GNU patch: succeeds, creates empty file
+// - diffy: fails (no ---/+++ headers means no valid UniDiff patches)
 #[test]
-#[ignore = "implementation differences"]
 fn create_empty_file_gitdiff() {
-    Case::gnu_patch("create_empty_file_gitdiff").run();
+    Case::gnu_patch("create_empty_file_gitdiff")
+        .strip(1)
+        .expect_success(false)
+        .expect_compat(false)
+        .run();
 }
 
 #[test]

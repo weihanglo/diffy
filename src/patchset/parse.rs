@@ -49,6 +49,10 @@ fn parse_gitdiff(input: &str) -> Result<PatchSet<'_, str>, PatchSetParseError> {
         patches.push(FilePatch::new(operation, patch, old_mode, new_mode));
     }
 
+    if patches.is_empty() {
+        return Err(PatchSetParseError::new("no valid patches found"));
+    }
+
     Ok(PatchSet::new(patches))
 }
 
@@ -61,6 +65,10 @@ fn parse_unidiff(input: &str) -> Result<PatchSet<'_, str>, PatchSetParseError> {
             Patch::from_str(patch_str).map_err(|e| PatchSetParseError::new(e.to_string()))?;
         let operation = extract_file_op_unidiff(patch.original_path(), patch.modified_path())?;
         patches.push(FilePatch::new(operation, patch, None, None));
+    }
+
+    if patches.is_empty() {
+        return Err(PatchSetParseError::new("no valid patches found"));
     }
 
     Ok(PatchSet::new(patches))
