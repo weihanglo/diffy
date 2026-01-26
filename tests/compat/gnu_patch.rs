@@ -133,15 +133,12 @@ fn fail_truncated_file() {
 
 // Single-file patch with junk between hunks.
 //
-// GNU patch behavior: Treats junk as preamble to a NEW patch, then prompts
-// "File to patch:" because no `---` header follows the junk.
-//
-// git apply behavior: "patch fragment without header at line N"
-//
-// Both tools reject this - hunks within a single file must be contiguous.
+// - GNU patch: succeeds, ignores trailing junk, applies first hunk only
+// - git apply: errors ("patch fragment without header")
+// - diffy: succeeds, matches GNU patch behavior
 #[test]
-fn fail_junk_between_hunks() {
-    Case::gnu_patch("fail_junk_between_hunks").run();
+fn junk_between_hunks() {
+    Case::gnu_patch("junk_between_hunks").run();
 }
 
 // Patches with headers but no hunks.
