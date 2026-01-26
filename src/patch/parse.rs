@@ -157,15 +157,12 @@ fn verify_hunks_in_order<T: ?Sized>(hunks: &[Hunk<'_, T>]) -> bool {
 
 fn hunks<'a, T: Text + ?Sized>(parser: &mut Parser<'a, T>) -> Result<Vec<Hunk<'a, T>>> {
     let mut hunks = Vec::new();
-    // Only continue if the next line is a hunk header (`@@ `).
+
+    // Parse hunks while we see @@ headers.
     //
-    // When `hunk_lines()` completes a hunk and encounters a non-hunk line
-    // (e.g., git extended header like `diff --git`),
-    // it stops and leaves that content in the parser.
-    // We must not attempt to parse that garbage as another hunk.
-    //
-    // This matches GNU patch behavior that hunks must be contiguous.
-    // Any non-hunk line after a complete hunk terminates hunk parsing for this patch.
+    // Following GNU patch behavior: stop at non-@@ content.
+    // Any trailing content (including hidden @@ headers) is silently ignored.
+    // This is more permissive than git apply, which errors on junk between hunks.
     while parser.peek().is_some_and(|line| line.starts_with("@@ ")) {
         hunks.push(hunk(parser)?);
     }
@@ -260,17 +257,29 @@ fn hunk_lines<'a, T: Text + ?Sized>(
             }
             return Err(ParsePatchError::new("expected end of hunk"));
         } else if let Some(line) = line.strip_prefix(" ") {
+            if hunk_complete {
+                break;
+            }
             Line::Context(line)
         } else if line.starts_with("\n") {
+            if hunk_complete {
+                break;
+            }
             Line::Context(*line)
         } else if let Some(line) = line.strip_prefix("-") {
             if no_newline_delete {
                 return Err(ParsePatchError::new("expected no more deleted lines"));
             }
+            if hunk_complete {
+                break;
+            }
             Line::Delete(line)
         } else if let Some(line) = line.strip_prefix("+") {
             if no_newline_insert {
                 return Err(ParsePatchError::new("expected no more inserted lines"));
+            }
+            if hunk_complete {
+                break;
             }
             Line::Insert(line)
         } else if line.starts_with(NO_NEWLINE_AT_EOF) {

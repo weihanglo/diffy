@@ -6,192 +6,63 @@
 //! - `git format-patch` email format (preamble/signature stripping)
 //! - Agreement between diffy and `git apply`
 
-use std::fs;
-use std::io::Write;
-use std::path::Path;
-use std::path::PathBuf;
-use std::process::Command;
-use std::process::Stdio;
-use std::sync::Once;
-
-use crate::common;
-use crate::common::TestError;
-
-/// Configuration for a git test case.
-#[derive(Default)]
-struct CaseConfig {
-    /// Strip level for path prefixes (default: 1).
-    strip_level: u32,
-}
-
-impl CaseConfig {
-    fn new() -> Self {
-        Self { strip_level: 1 }
-    }
-
-    fn strip(mut self, level: u32) -> Self {
-        self.strip_level = level;
-        self
-    }
-}
-
-/// Run `git apply` to apply a patch.
-fn git_apply(repo: &Path, patch: &str, strip_level: u32) -> Result<(), String> {
-    let mut cmd = Command::new("git");
-    cmd.env("GIT_CONFIG_NOSYSTEM", "1");
-    cmd.env("GIT_CONFIG_GLOBAL", "/dev/null");
-    cmd.current_dir(repo);
-    cmd.args(["apply", &format!("-p{strip_level}"), "-"]);
-    cmd.stdin(Stdio::piped());
-    cmd.stdout(Stdio::piped());
-    cmd.stderr(Stdio::piped());
-
-    let mut child = cmd.spawn().expect("failed to spawn git apply");
-    child
-        .stdin
-        .as_mut()
-        .unwrap()
-        .write_all(patch.as_bytes())
-        .unwrap();
-
-    let output = child.wait_with_output().unwrap();
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(String::from_utf8_lossy(&output.stderr).to_string())
-    }
-}
-
-fn case_dir(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/compat/git")
-        .join(name)
-}
-
-fn print_git_version() {
-    static ONCE: Once = Once::new();
-    ONCE.call_once(|| {
-        let output = Command::new("git").arg("--version").output();
-        match output {
-            Ok(o) if o.status.success() => {
-                let version = String::from_utf8_lossy(&o.stdout);
-                eprintln!(
-                    "git version: {}",
-                    version.lines().next().unwrap_or("unknown")
-                );
-            }
-            Ok(o) => {
-                eprintln!("git --version failed: {}", o.status);
-            }
-            Err(e) => {
-                eprintln!("git command not found: {e}");
-            }
-        }
-    });
-}
-
-/// Run a fixture-based git test case.
-///
-/// Applies patch with diffy, compares against snapshot.
-/// In CI mode, also verifies git apply produces the same result.
-fn run_case(case_dir: &Path, config: CaseConfig) -> Result<(), TestError> {
-    let in_dir = case_dir.join("in");
-    let patch_path = in_dir.join("foo.patch");
-    let patch = fs::read_to_string(&patch_path)
-        .unwrap_or_else(|e| panic!("failed to read {}: {e}", patch_path.display()));
-
-    let case_name = case_dir.file_name().unwrap().to_string_lossy();
-    let temp_base = crate::common::temp_base();
-
-    let diffy_output = temp_base.join(format!("git-{case_name}-diffy"));
-    crate::common::create_output_dir(&diffy_output);
-
-    // Apply with diffy
-    let diffy_result = common::apply_diffy(
-        &in_dir,
-        &patch,
-        &diffy_output,
-        diffy::patchset::ParseMode::GitDiff,
-        config.strip_level as usize,
-    );
-
-    // In CI mode, also verify git apply behavior matches
-    if common::is_ci() {
-        print_git_version();
-
-        let git_output = temp_base.join(format!("git-{case_name}-git"));
-        crate::common::create_output_dir(&git_output);
-        crate::common::copy_input_files(&in_dir, &git_output, &["patch"]);
-
-        let git_result = git_apply(&git_output, &patch, config.strip_level);
-
-        // Both must agree on success/failure
-        assert_eq!(
-            git_result.is_ok(),
-            diffy_result.is_ok(),
-            "diffy and git apply disagree on {}: git={git_result:?}, diffy={diffy_result:?}",
-            case_dir.display()
-        );
-
-        // For success cases, verify outputs match
-        if diffy_result.is_ok() {
-            snapbox::assert_subset_eq(&git_output, &diffy_output);
-        }
-    }
-
-    // Compare against expected snapshot
-    diffy_result?;
-    snapbox::assert_subset_eq(case_dir.join("out"), &diffy_output);
-
-    Ok(())
-}
+use crate::common::Case;
 
 #[test]
 fn path_no_prefix() {
-    run_case(&case_dir("path_no_prefix"), CaseConfig::new().strip(0)).unwrap();
+    Case::git("path_no_prefix").run();
 }
 
 #[test]
 fn path_quoted_escapes() {
-    run_case(&case_dir("path_quoted_escapes"), CaseConfig::new()).unwrap();
+    Case::git("path_quoted_escapes").strip(1).run();
 }
 
 #[test]
 fn path_with_spaces() {
-    run_case(&case_dir("path_with_spaces"), CaseConfig::new()).unwrap();
+    Case::git("path_with_spaces").strip(1).run();
 }
 
 #[test]
 fn path_containing_space_b() {
-    run_case(&case_dir("path_containing_space_b"), CaseConfig::new()).unwrap();
+    Case::git("path_containing_space_b").strip(1).run();
 }
 
 #[test]
 fn format_patch_preamble() {
     // Ambiguous: where does preamble end? First `\n---\n` - verify matches git
-    run_case(&case_dir("format_patch_preamble"), CaseConfig::new()).unwrap();
+    Case::git("format_patch_preamble").strip(1).run();
 }
 
 #[test]
 fn format_patch_diff_in_message() {
     // `diff --git` in commit message must NOT trigger early parsing
-    run_case(&case_dir("format_patch_diff_in_message"), CaseConfig::new()).unwrap();
+    Case::git("format_patch_diff_in_message").strip(1).run();
 }
 
 #[test]
 fn format_patch_multiple_separators() {
     // Git uses first `\n---\n` as separator (observed git mailinfo behavior)
-    run_case(
-        &case_dir("format_patch_multiple_separators"),
-        CaseConfig::new(),
-    )
-    .unwrap();
+    Case::git("format_patch_multiple_separators").strip(1).run();
 }
 
 #[test]
 fn format_patch_signature() {
     // Ambiguous: `\n-- \n` could appear in patch content - verify matches git
-    run_case(&case_dir("format_patch_signature"), CaseConfig::new()).unwrap();
+    Case::git("format_patch_signature").strip(1).run();
+}
+
+#[test]
+fn nested_diff_signature() {
+    // Patch that deletes a diff file containing `-- ` patterns within its content,
+    // followed by a real email signature at the end.
+    //
+    // Tests that we correctly distinguish between:
+    // - `-- ` appearing as patch content (from inner diff's empty context lines)
+    // - `-- ` appearing as the actual email signature separator
+    //
+    // Both git apply and GNU patch handle this correctly.
+    Case::git("nested_diff_signature").strip(1).run();
 }
 
 #[test]
@@ -199,5 +70,29 @@ fn path_ambiguous_suffix() {
     // Multiple valid splits in `diff --git` line; algorithm picks longest common suffix.
     // Tests the pathological case from parse.rs comments where custom prefix
     // creates `src/foo.rs src/foo.rs src/foo.rs src/foo.rs` - verify matches git.
-    run_case(&case_dir("path_ambiguous_suffix"), CaseConfig::new()).unwrap();
+    Case::git("path_ambiguous_suffix").strip(1).run();
+}
+
+// Single-file patch with junk between hunks.
+//
+// git apply error: "patch fragment without header at line N"
+//
+// Hunks within a single file must be contiguous.
+#[test]
+fn fail_junk_between_hunks() {
+    Case::git("fail_junk_between_hunks")
+        .expect_success(false)
+        .run();
+}
+
+// Multi-file patch with junk/preamble text between different files.
+//
+// git apply behavior: Ignores content between `diff --git` boundaries.
+// In GitDiff mode, splitting occurs at `diff --git`, so junk between
+// files becomes trailing content of the previous chunk (harmless).
+//
+// This is different from junk between HUNKS of the same file (which fails).
+#[test]
+fn junk_between_files() {
+    Case::git("junk_between_files").strip(1).run();
 }
