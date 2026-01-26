@@ -168,7 +168,11 @@ fn format_patch_preamble() {
 #[test]
 fn format_patch_diff_in_message() {
     // `diff --git` in commit message must NOT trigger early parsing
-    run_case(&case_dir("format_patch_diff_in_message"), CaseConfig::with_p1()).unwrap();
+    run_case(
+        &case_dir("format_patch_diff_in_message"),
+        CaseConfig::with_p1(),
+    )
+    .unwrap();
 }
 
 #[test]
@@ -185,6 +189,23 @@ fn format_patch_multiple_separators() {
 fn format_patch_signature() {
     // Ambiguous: `\n-- \n` could appear in patch content - verify matches git
     run_case(&case_dir("format_patch_signature"), CaseConfig::with_p1()).unwrap();
+}
+
+#[test]
+fn nested_diff_signature() {
+    // Patch that deletes a diff file containing `-- ` patterns within its content,
+    // followed by a real email signature at the end.
+    //
+    // Tests that we correctly distinguish between:
+    // - `-- ` appearing as patch content (from inner diff's empty context lines)
+    // - `-- ` appearing as the actual email signature separator
+    //
+    // Both git apply and GNU patch handle this correctly.
+    run_case(
+        &case_dir("nested_diff_signature"),
+        CaseConfig::with_p1().expect_incompat(true),
+    )
+    .unwrap_err();
 }
 
 #[test]

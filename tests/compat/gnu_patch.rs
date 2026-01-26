@@ -203,6 +203,23 @@ fn trailing_signature() {
     run_case(&case_dir("trailing_signature"), CaseConfig::default()).unwrap();
 }
 
+// Patch that deletes a diff file containing `-- ` patterns within its content,
+// followed by a real email signature at the end.
+//
+// This tests that we correctly distinguish between:
+// - `-- ` appearing as patch content (from inner diff's empty context lines)
+// - `-- ` appearing as the actual email signature separator
+//
+// Both GNU patch and git apply handle this correctly without pre-stripping.
+#[test]
+fn nested_diff_signature() {
+    run_case(
+        &case_dir("nested_diff_signature"),
+        CaseConfig::with_p1().expect_incompat(true),
+    )
+    .unwrap_err();
+}
+
 #[test]
 fn fail_context_mismatch() {
     run_case(&case_dir("fail_context_mismatch"), CaseConfig::default()).unwrap_err();
