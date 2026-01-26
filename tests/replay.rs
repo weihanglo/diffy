@@ -55,8 +55,24 @@ use std::sync::mpsc;
 use std::thread;
 
 use diffy::patchset::FileOperation;
-use diffy::patchset::ParseMode;
+use diffy::patchset::ParseOptions;
 use diffy::patchset::PatchSet;
+
+/// Local enum for test configuration (maps to ParseOptions).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TestMode {
+    UniDiff,
+    GitDiff,
+}
+
+impl From<TestMode> for ParseOptions {
+    fn from(value: TestMode) -> Self {
+        match value {
+            TestMode::UniDiff => ParseOptions::unidiff(),
+            TestMode::GitDiff => ParseOptions::gitdiff(),
+        }
+    }
+}
 
 /// Strip the first `n` path components from a path.
 fn strip_path_prefix(path: &str, n: usize) -> String {
@@ -102,13 +118,13 @@ fn max_commits() -> usize {
     }
 }
 
-fn parse_mode() -> ParseMode {
+fn test_mode() -> TestMode {
     let Ok(val) = env::var("DIFFY_TEST_PARSE_MODE") else {
-        return ParseMode::UniDiff;
+        return TestMode::UniDiff;
     };
     match val.trim().to_lowercase().as_str() {
-        "unidiff" => ParseMode::UniDiff,
-        "gitdiff" => ParseMode::GitDiff,
+        "unidiff" => TestMode::UniDiff,
+        "gitdiff" => TestMode::GitDiff,
         _ => panic!("invalid DIFFY_TEST_PARSE_MODE='{val}': expected 'unidiff' or 'gitdiff'"),
     }
 }
@@ -200,7 +216,7 @@ fn process_commit(
     idx: usize,
     parent: &str,
     child: &str,
-    mode: ParseMode,
+    mode: TestMode,
 ) -> CommitResult {
     let parent_short = parent[..8].to_string();
     let child_short = child[..8].to_string();
@@ -211,8 +227,8 @@ fn process_commit(
     // UniDiff format cannot express pure renames (no ---/+++ headers).
     // Use `--no-renames` to represent them as delete + create instead.
     let diff_output = match mode {
-        ParseMode::UniDiff => git(repo, &["diff", "--no-renames", parent, child]),
-        ParseMode::GitDiff => git(repo, &["diff", parent, child]),
+        TestMode::UniDiff => git(repo, &["diff", "--no-renames", parent, child]),
+        TestMode::GitDiff => git(repo, &["diff", parent, child]),
     };
 
     if diff_output.is_empty() {
@@ -227,7 +243,7 @@ fn process_commit(
         };
     }
 
-    let patchset = match PatchSet::parse(&diff_output, mode) {
+    let patchset = match PatchSet::parse(&diff_output, mode.into()) {
         Ok(ps) => ps,
         Err(e) => {
             panic!(
@@ -239,7 +255,7 @@ fn process_commit(
 
     // Verify we parsed the same number of patches as git reports files changed.
     // This catches cases where patches are silently skipped.
-    let expected_file_count = if mode == ParseMode::UniDiff {
+    let expected_file_count = if mode == TestMode::UniDiff {
         // In UniDiff mode,
         //
         // we need to filter out empty file changes,
@@ -389,7 +405,7 @@ fn process_commit(
 fn test_replay() {
     let repo = repo_path();
     let max = max_commits();
-    let mode = parse_mode();
+    let mode = test_mode();
     let commits = commit_history(&repo, max);
 
     if commits.len() < 2 {
@@ -402,8 +418,8 @@ fn test_replay() {
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| ".".to_string());
     let mode_name = match mode {
-        ParseMode::UniDiff => "unidiff",
-        ParseMode::GitDiff => "gitdiff",
+        TestMode::GitDiff => "gitdiff",
+        TestMode::UniDiff => "unidiff",
     };
 
     let (tx, rx) = mpsc::channel::<CommitResult>();

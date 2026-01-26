@@ -2,7 +2,13 @@
 
 use std::borrow::Cow;
 
-use super::{FileMode, FileOperation, FilePatch, ParseMode, PatchSet, PatchSetParseError};
+use super::FileMode;
+use super::FileOperation;
+use super::FilePatch;
+use super::Format;
+use super::ParseOptions;
+use super::PatchSet;
+use super::PatchSetParseError;
 use crate::utils::escaped_filename;
 use crate::Patch;
 
@@ -19,10 +25,10 @@ const DEV_NULL: &str = "/dev/null";
 const EMAIL_PREAMBLE_SEPARATOR: &str = "\n---\n";
 
 /// Parse a multi-file patch.
-pub fn parse(input: &str, mode: ParseMode) -> Result<PatchSet<'_, str>, PatchSetParseError> {
-    match mode {
-        ParseMode::GitDiff => parse_gitdiff(input),
-        ParseMode::UniDiff => parse_unidiff(input),
+pub fn parse(input: &str, opts: ParseOptions) -> Result<PatchSet<'_, str>, PatchSetParseError> {
+    match opts.format {
+        Format::GitDiff => parse_gitdiff(input),
+        Format::UniDiff => parse_unidiff(input),
     }
 }
 

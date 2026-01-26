@@ -11,10 +11,26 @@ use crate::Patch;
 use std::borrow::Cow;
 use std::fmt;
 
-/// Patch format to parse.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ParseMode {
-    /// Standard [unified diff] format.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) enum Format {
+    /// Standard unified diff format.
+    #[default]
+    UniDiff,
+    /// Git extended diff format.
+    GitDiff,
+}
+
+/// Options for parsing patch content.
+///
+/// Use [`ParseOptions::unidiff()`] or [`ParseOptions::gitdiff()`]
+/// to create options for the desired format.
+#[derive(Debug, Clone)]
+pub struct ParseOptions {
+    pub(crate) format: Format,
+}
+
+impl ParseOptions {
+    /// Parse as standard [unified diff] format.
     ///
     /// Supported:
     ///
@@ -23,15 +39,23 @@ pub enum ParseMode {
     /// * modify and rename files
     /// * create files (`--- /dev/null`)
     /// * delete files (`+++ /dev/null`)
-    /// - Skip preamble, headers, and email signature trailer
+    /// * Skip preamble, headers, and email signature trailer
     ///
     /// [unified diff]: https://www.gnu.org/software/diffutils/manual/html_node/Unified-Format.html
-    UniDiff,
+    pub fn unidiff() -> Self {
+        Self {
+            format: Format::UniDiff,
+        }
+    }
 
-    /// [Git extended diff format][git-diff-format].
+    /// Parse as [git extended diff format][git-diff-format].
     ///
     /// [git-diff-format]: https://git-scm.com/docs/diff-format
-    GitDiff,
+    pub fn gitdiff() -> Self {
+        Self {
+            format: Format::GitDiff,
+        }
+    }
 }
 
 /// A collection of patches for multiple files.
@@ -61,7 +85,7 @@ impl<'a> PatchSet<'a, str> {
     /// # Example
     ///
     /// ```
-    /// use diffy::patchset::{PatchSet, ParseMode};
+    /// use diffy::patchset::{PatchSet, ParseOptions};
     ///
     /// let s = "\
     /// --- a/file1.rs
@@ -76,12 +100,12 @@ impl<'a> PatchSet<'a, str> {
     /// +bar
     /// ";
     ///
-    /// // Parse as standard unified diff only
-    /// let patchset = PatchSet::parse(s, ParseMode::UniDiff).unwrap();
+    /// // Parse as standard unified diff
+    /// let patchset = PatchSet::parse(s, ParseOptions::unidiff()).unwrap();
     /// assert_eq!(patchset.patches().len(), 2);
     /// ```
-    pub fn parse(s: &'a str, mode: ParseMode) -> Result<PatchSet<'a, str>, PatchSetParseError> {
-        parse::parse(s, mode)
+    pub fn parse(s: &'a str, opts: ParseOptions) -> Result<PatchSet<'a, str>, PatchSetParseError> {
+        parse::parse(s, opts)
     }
 }
 

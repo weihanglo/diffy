@@ -9,16 +9,16 @@ use std::process::Stdio;
 use std::sync::Once;
 
 use diffy::patchset::FileOperation;
-use diffy::patchset::ParseMode;
+use diffy::patchset::ParseOptions;
 use diffy::patchset::PatchSet;
 use diffy::patchset::PatchSetParseError;
 
 /// Which external tool to compare against.
 #[derive(Clone, Copy)]
 pub enum CompatMode {
-    /// git apply with ParseMode::GitDiff
+    /// git apply with ParseOptions::gitdiff()
     Git,
-    /// GNU patch with ParseMode::UniDiff
+    /// GNU patch with ParseOptions::unidiff()
     GnuPatch,
 }
 
@@ -102,14 +102,13 @@ impl<'a> Case<'a> {
         let diffy_output = temp_base.join(format!("{prefix}-{case_name}-diffy"));
         create_output_dir(&diffy_output);
 
-        let parse_mode = match self.mode {
-            CompatMode::Git => ParseMode::GitDiff,
-            CompatMode::GnuPatch => ParseMode::UniDiff,
+        let opts = match self.mode {
+            CompatMode::Git => ParseOptions::gitdiff(),
+            CompatMode::GnuPatch => ParseOptions::unidiff(),
         };
 
         // Apply with diffy
-        let diffy_result =
-            apply_diffy(&in_dir, &patch, &diffy_output, parse_mode, self.strip_level);
+        let diffy_result = apply_diffy(&in_dir, &patch, &diffy_output, opts, self.strip_level);
 
         // Verify diffy result matches expectation
         if self.expect_success {
@@ -332,10 +331,10 @@ pub fn apply_diffy(
     in_dir: &Path,
     patch: &str,
     output_dir: &Path,
-    mode: ParseMode,
+    opts: ParseOptions,
     strip_prefix: u32,
 ) -> Result<(), TestError> {
-    let patchset = PatchSet::parse(patch, mode).map_err(TestError::Parse)?;
+    let patchset = PatchSet::parse(patch, opts).map_err(TestError::Parse)?;
 
     for file_patch in patchset.iter() {
         let operation = file_patch.operation().strip_prefix(strip_prefix as usize);
