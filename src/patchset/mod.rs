@@ -11,10 +11,63 @@ use crate::Patch;
 use std::borrow::Cow;
 use std::fmt;
 
-/// Patch format to parse.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ParseMode {
-    /// Standard [unified diff] format.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) enum Format {
+    /// Standard unified diff format.
+    #[default]
+    UniDiff,
+    /// Git extended diff format.
+    GitDiff,
+}
+
+/// How to handle binary diffs.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) enum Binary {
+    /// Skip binary diffs silently.
+    #[default]
+    Skip,
+    /// Return error if binary diff encountered.
+    Fail,
+}
+
+/// Options for parsing patch content.
+///
+/// Use [`ParseOptions::unidiff()`] or [`ParseOptions::gitdiff()`]
+/// to create options for the desired format.
+///
+/// ## Binary Files
+///
+/// When parsing git diffs, binary file changes are detected by:
+///
+/// * `Binary files a/path and b/path differ` (`git diff` without `--binary` flag)
+/// * `GIT binary patch` (from `git diff --binary`)
+///
+/// Note that this is not a documented Git behavior,
+/// so the implementation here is subject to change ifn Git changes
+///
+/// By default, binary diffs are skipped.
+///
+/// ## Example
+///
+/// ```
+/// use diffy::patchset::ParseOptions;
+/// use diffy::patchset::PatchSet;
+///
+/// let input = "diff --git a/img.png b/img.png\nBinary files differ\n";
+/// let ps = PatchSet::parse(input, ParseOptions::gitdiff()).unwrap();
+/// assert!(ps.is_empty()); // binary was skipped
+///
+/// let result = PatchSet::parse(input, ParseOptions::gitdiff().fail_on_binary());
+/// assert!(result.is_err());
+/// ```
+#[derive(Debug, Clone)]
+pub struct ParseOptions {
+    pub(crate) format: Format,
+    pub(crate) binary: Binary,
+}
+
+impl ParseOptions {
+    /// Parse as standard [unified diff] format.
     ///
     /// Supported:
     ///
@@ -23,15 +76,44 @@ pub enum ParseMode {
     /// * modify and rename files
     /// * create files (`--- /dev/null`)
     /// * delete files (`+++ /dev/null`)
-    /// - Skip preamble, headers, and email signature trailer
+    /// * Skip preamble, headers, and email signature trailer
     ///
     /// [unified diff]: https://www.gnu.org/software/diffutils/manual/html_node/Unified-Format.html
-    UniDiff,
+    pub fn unidiff() -> Self {
+        Self {
+            format: Format::UniDiff,
+            binary: Binary::Skip,
+        }
+    }
 
-    /// [Git extended diff format][git-diff-format].
+    /// Parse as [git extended diff format][git-diff-format].
+    ///
+    /// Supports all features of [`unidiff()`](Self::unidiff) plus:
+    ///
+    /// * `diff --git` headers
+    /// * Extended headers (`new file mode`, `deleted file mode`, etc.)
+    /// * Rename/copy detection (`rename from`/`rename to`, `copy from`/`copy to`)
+    /// * Binary file detection (skipped by default)
     ///
     /// [git-diff-format]: https://git-scm.com/docs/diff-format
-    GitDiff,
+    pub fn gitdiff() -> Self {
+        Self {
+            format: Format::GitDiff,
+            binary: Binary::Skip,
+        }
+    }
+
+    /// Skip binary diffs silently.
+    pub fn skip_binary(mut self) -> Self {
+        self.binary = Binary::Skip;
+        self
+    }
+
+    /// Return an error if a binary diff is encountered.
+    pub fn fail_on_binary(mut self) -> Self {
+        self.binary = Binary::Fail;
+        self
+    }
 }
 
 /// A collection of patches for multiple files.
@@ -61,7 +143,7 @@ impl<'a> PatchSet<'a, str> {
     /// # Example
     ///
     /// ```
-    /// use diffy::patchset::{PatchSet, ParseMode};
+    /// use diffy::patchset::{PatchSet, ParseOptions};
     ///
     /// let s = "\
     /// --- a/file1.rs
@@ -76,12 +158,12 @@ impl<'a> PatchSet<'a, str> {
     /// +bar
     /// ";
     ///
-    /// // Parse as standard unified diff only
-    /// let patchset = PatchSet::parse(s, ParseMode::UniDiff).unwrap();
+    /// // Parse as standard unified diff
+    /// let patchset = PatchSet::parse(s, ParseOptions::unidiff()).unwrap();
     /// assert_eq!(patchset.patches().len(), 2);
     /// ```
-    pub fn parse(s: &'a str, mode: ParseMode) -> Result<PatchSet<'a, str>, PatchSetParseError> {
-        parse::parse(s, mode)
+    pub fn parse(s: &'a str, opts: ParseOptions) -> Result<PatchSet<'a, str>, PatchSetParseError> {
+        parse::parse(s, opts)
     }
 }
 

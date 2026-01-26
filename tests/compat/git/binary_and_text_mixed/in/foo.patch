@@ -1,0 +1,9 @@
+diff --git a/image.png b/image.png
+index 731e575..638edd9 100644
+Binary files a/image.png and b/image.png differ
+diff --git a/text.txt b/text.txt
+--- a/text.txt
++++ b/text.txt
+@@ -1 +1 @@
+-old content
++new content
