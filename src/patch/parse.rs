@@ -257,17 +257,29 @@ fn hunk_lines<'a, T: Text + ?Sized>(
             }
             return Err(ParsePatchError::new("expected end of hunk"));
         } else if let Some(line) = line.strip_prefix(" ") {
+            if hunk_complete {
+                break;
+            }
             Line::Context(line)
         } else if line.starts_with("\n") {
+            if hunk_complete {
+                break;
+            }
             Line::Context(*line)
         } else if let Some(line) = line.strip_prefix("-") {
             if no_newline_delete {
                 return Err(ParsePatchError::new("expected no more deleted lines"));
             }
+            if hunk_complete {
+                break;
+            }
             Line::Delete(line)
         } else if let Some(line) = line.strip_prefix("+") {
             if no_newline_insert {
                 return Err(ParsePatchError::new("expected no more inserted lines"));
+            }
+            if hunk_complete {
+                break;
             }
             Line::Insert(line)
         } else if line.starts_with(NO_NEWLINE_AT_EOF) {

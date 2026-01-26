@@ -20,10 +20,6 @@ const EMAIL_PREAMBLE_SEPARATOR: &str = "\n---\n";
 
 /// Parse a multi-file patch.
 pub fn parse(input: &str, mode: ParseMode) -> Result<PatchSet<'_, str>, PatchSetParseError> {
-    // Email signatures would be parsed as a delete line and corrupt the hunk.
-    // Must strip before parsing.
-    let input = strip_email_signature(input);
-
     match mode {
         ParseMode::GitDiff => parse_gitdiff(input),
         ParseMode::UniDiff => parse_unidiff(input),
@@ -219,25 +215,6 @@ fn strip_email_preamble(input: &str) -> &str {
     match input.find(EMAIL_PREAMBLE_SEPARATOR) {
         Some(pos) => &input[pos + EMAIL_PREAMBLE_SEPARATOR.len()..],
         None => input,
-    }
-}
-
-/// Strips trailing email signature (RFC 3676).
-///
-/// The signature separator is defined in RFC 3676 Section 4.3 and Section 6:
-/// <https://www.rfc-editor.org/rfc/rfc3676#section-4.3>
-///
-/// ABNF: `sig-sep = "--" SP CRLF`
-///
-/// **Note**: Currently only check for LF line endings (`\n-- \n`).
-/// If the input has CRLF line endings (e.g., from email transport),
-/// the caller must normalize to LF before parsing.
-fn strip_email_signature(input: &str) -> &str {
-    if let Some(pos) = input.rfind("\n-- \n") {
-        // Keep content up to and including the newline before "-- "
-        &input[..pos + 1]
-    } else {
-        input
     }
 }
 

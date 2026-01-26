@@ -238,11 +238,7 @@ fn trailing_signature() {
 // Both GNU patch and git apply handle this correctly without pre-stripping.
 #[test]
 fn nested_diff_signature() {
-    run_case(
-        &case_dir("nested_diff_signature"),
-        CaseConfig::with_p1().expect_incompat(true),
-    )
-    .unwrap_err();
+    run_case(&case_dir("nested_diff_signature"), CaseConfig::with_p1()).unwrap();
 }
 
 #[test]

@@ -201,11 +201,7 @@ fn nested_diff_signature() {
     // - `-- ` appearing as the actual email signature separator
     //
     // Both git apply and GNU patch handle this correctly.
-    run_case(
-        &case_dir("nested_diff_signature"),
-        CaseConfig::with_p1().expect_incompat(true),
-    )
-    .unwrap_err();
+    run_case(&case_dir("nested_diff_signature"), CaseConfig::with_p1()).unwrap();
 }
 
 #[test]
