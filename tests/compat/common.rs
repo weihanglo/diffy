@@ -110,3 +110,7 @@ pub fn apply_diffy(
 
     Ok(())
 }
+
+pub fn is_ci() -> bool {
+    std::env::var("CI").is_ok()
+}

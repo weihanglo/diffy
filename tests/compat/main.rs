@@ -41,4 +41,5 @@
 //! For failure tests, use `.unwrap_err()` and skip step 2.
 
 mod common;
+mod git;
 mod gnu_patch;
