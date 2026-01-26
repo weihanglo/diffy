@@ -108,13 +108,23 @@ fn run_case(case_dir: &Path, config: CaseConfig) -> Result<(), TestError> {
 
         let git_result = git_apply(&git_output, &patch, config.strip_level);
 
-        // Both must agree on success/failure
-        assert_eq!(
-            git_result.is_ok(),
-            diffy_result.is_ok(),
-            "diffy and git apply disagree on {}: git={git_result:?}, diffy={diffy_result:?}",
-            case_dir.display()
-        );
+        // Verify agreement/disagreement based on expectation
+        if config.expect_incompat {
+            assert_ne!(
+                git_result.is_ok(),
+                diffy_result.is_ok(),
+                "expected diffy and git apply to disagree on {}, but both returned same result: \
+                 git={git_result:?}, diffy={diffy_result:?}",
+                case_dir.display()
+            );
+        } else {
+            assert_eq!(
+                git_result.is_ok(),
+                diffy_result.is_ok(),
+                "diffy and git apply disagree on {}: git={git_result:?}, diffy={diffy_result:?}",
+                case_dir.display()
+            );
+        }
 
         // For success cases, verify outputs match
         if diffy_result.is_ok() {

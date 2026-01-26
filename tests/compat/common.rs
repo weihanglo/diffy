@@ -14,8 +14,8 @@ use diffy::patchset::PatchSetParseError;
 pub struct CaseConfig {
     /// Strip level for path prefixes
     pub strip_level: u32,
-    /// Skip checking compatibility with external tools
-    pub skip_compat_check: bool,
+    /// When true, expect diffy and external tool to be incompatible (disagree on success/failure).
+    pub expect_incompat: bool,
 }
 
 impl CaseConfig {
@@ -32,8 +32,8 @@ impl CaseConfig {
         self
     }
 
-    pub fn skip_compat_check(mut self, skip: bool) -> Self {
-        self.skip_compat_check = skip;
+    pub fn expect_incompat(mut self, expect: bool) -> Self {
+        self.expect_incompat = expect;
         self
     }
 }

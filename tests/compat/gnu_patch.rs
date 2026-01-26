@@ -69,8 +69,8 @@ fn run_case(case_dir: &Path, cfg: CaseConfig) -> Result<(), TestError> {
         cfg.strip_level,
     );
 
-    // In CI mode, also verify GNU patch behavior matches (unless explicitly skipped)
-    if common::is_ci() && !cfg.skip_compat_check {
+    // In CI mode, also verify GNU patch behavior
+    if common::is_ci() {
         print_patch_version();
 
         let gnu_output = temp_base.join(format!("gnu-{case_name}-gnu"));
@@ -82,12 +82,21 @@ fn run_case(case_dir: &Path, cfg: CaseConfig) -> Result<(), TestError> {
             snapbox::assert_subset_eq(&gnu_output, &diffy_output);
         }
 
-        // Verify both agree on success/failure
-        assert_eq!(
-            diffy_result.is_ok(),
-            gnu_result.is_ok(),
-            "diffy and GNU patch disagree: diffy={diffy_result:?}, gnu={gnu_result:?}",
-        );
+        // Verify agreement/disagreement based on expectation
+        if cfg.expect_incompat {
+            assert_ne!(
+                diffy_result.is_ok(),
+                gnu_result.is_ok(),
+                "expected diffy and GNU patch to disagree, but both returned same result: \
+                 diffy={diffy_result:?}, gnu={gnu_result:?}",
+            );
+        } else {
+            assert_eq!(
+                diffy_result.is_ok(),
+                gnu_result.is_ok(),
+                "diffy and GNU patch disagree: diffy={diffy_result:?}, gnu={gnu_result:?}",
+            );
+        }
     }
 
     diffy_result?;
@@ -223,7 +232,7 @@ fn fail_truncated_file() {
 fn fail_no_hunk() {
     run_case(
         &case_dir("fail_no_hunk"),
-        CaseConfig::default().skip_compat_check(true),
+        CaseConfig::default().expect_incompat(true),
     )
     .unwrap();
 }
