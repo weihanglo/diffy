@@ -591,17 +591,18 @@ new mode 100755
     }
 
     #[test]
-    fn binary_file() {
+    fn binary_file_modify() {
+        // Standard binary diff format for modification
         let content = "\
 diff --git a/image.png b/image.png
 index 1234567..89abcdef 100644
 Binary files a/image.png and b/image.png differ
 ";
         let patchset = PatchSet::parse(content, ParseMode::GitDiff).unwrap();
-        assert_eq!(patchset.len(), 1);
 
-        // Binary file is represented as Modify with empty hunks
-        // TODO: true binary patch support
+        // Current behavior: parsed as 1 file patch with 0 hunks
+        // TODO(binary-skip): should be skipped, assert patchset.is_empty()
+        assert_eq!(patchset.len(), 1);
         assert_eq!(
             patchset.patches()[0].operation(),
             &FileOperation::Modify {
@@ -610,6 +611,166 @@ Binary files a/image.png and b/image.png differ
             }
         );
         assert!(patchset.patches()[0].patch().hunks().is_empty());
+    }
+
+    #[test]
+    fn binary_file_create() {
+        // Binary diff for new file creation
+        let content = "\
+diff --git a/binary.bin b/binary.bin
+new file mode 100644
+index 0000000..db12d84
+Binary files /dev/null and b/binary.bin differ
+";
+        let patchset = PatchSet::parse(content, ParseMode::GitDiff).unwrap();
+
+        // Current behavior: parsed as Create with 0 hunks
+        // TODO(binary-skip): should be skipped, assert patchset.is_empty()
+        assert_eq!(patchset.len(), 1);
+        assert_eq!(
+            patchset.patches()[0].operation(),
+            &FileOperation::Create("b/binary.bin".to_owned().into()),
+        );
+        assert!(patchset.patches()[0].patch().hunks().is_empty());
+    }
+
+    #[test]
+    fn binary_file_delete() {
+        // Binary diff for file deletion
+        let content = "\
+diff --git a/binary.bin b/binary.bin
+deleted file mode 100644
+index 19d44f5..0000000
+Binary files a/binary.bin and /dev/null differ
+";
+        let patchset = PatchSet::parse(content, ParseMode::GitDiff).unwrap();
+
+        // Current behavior: parsed as Delete with 0 hunks
+        // TODO(binary-skip): should be skipped, assert patchset.is_empty()
+        assert_eq!(patchset.len(), 1);
+        assert_eq!(
+            patchset.patches()[0].operation(),
+            &FileOperation::Delete("a/binary.bin".to_owned().into()),
+        );
+        assert!(patchset.patches()[0].patch().hunks().is_empty());
+    }
+
+    #[test]
+    fn git_binary_patch_format() {
+        // `git diff --binary` outputs base85-encoded content
+        let content = "\
+diff --git a/binary.bin b/binary.bin
+new file mode 100644
+index 0000000..638edd9
+GIT binary patch
+literal 14
+YcmV+p0P+80Xkl(=Wn=(iX>MV1c_&H*Pyhe`
+
+literal 0
+KcmV+b0RR6000031
+
+";
+        let patchset = PatchSet::parse(content, ParseMode::GitDiff).unwrap();
+
+        // Current behavior: parsed as Create with 0 hunks
+        // The base85 content is not parsed as hunks
+        // TODO(binary-skip): should be skipped, assert patchset.is_empty()
+        assert_eq!(patchset.len(), 1);
+        assert_eq!(
+            patchset.patches()[0].operation(),
+            &FileOperation::Create("b/binary.bin".to_owned().into()),
+        );
+        assert!(patchset.patches()[0].patch().hunks().is_empty());
+    }
+
+    #[test]
+    fn binary_and_text_mixed() {
+        // A patchset containing both binary and text file changes
+        let content = "\
+diff --git a/image.png b/image.png
+index 731e575..638edd9 100644
+Binary files a/image.png and b/image.png differ
+diff --git a/text.txt b/text.txt
+index c182a93..a39caff 100644
+--- a/text.txt
++++ b/text.txt
+@@ -1 +1 @@
+-old content
++new content
+";
+        let patchset = PatchSet::parse(content, ParseMode::GitDiff).unwrap();
+
+        // Current behavior: both patches are parsed
+        // TODO(binary-skip): only text patch should remain, assert_eq!(patchset.len(), 1)
+        assert_eq!(patchset.len(), 2);
+
+        // First is binary (0 hunks)
+        assert!(patchset.patches()[0].patch().hunks().is_empty());
+        assert_eq!(
+            patchset.patches()[0].operation(),
+            &FileOperation::Modify {
+                original: "a/image.png".to_owned().into(),
+                modified: "b/image.png".to_owned().into(),
+            }
+        );
+
+        // Second is text (1 hunk)
+        assert_eq!(patchset.patches()[1].patch().hunks().len(), 1);
+        assert_eq!(
+            patchset.patches()[1].operation(),
+            &FileOperation::Modify {
+                original: "a/text.txt".to_owned().into(),
+                modified: "b/text.txt".to_owned().into(),
+            }
+        );
+    }
+
+    #[test]
+    fn text_and_binary_mixed() {
+        // Same as above but text comes first - order should be preserved
+        let content = "\
+diff --git a/text.txt b/text.txt
+--- a/text.txt
++++ b/text.txt
+@@ -1 +1 @@
+-old
++new
+diff --git a/binary.bin b/binary.bin
+Binary files a/binary.bin and b/binary.bin differ
+";
+        let patchset = PatchSet::parse(content, ParseMode::GitDiff).unwrap();
+
+        // Current behavior: both patches are parsed
+        // TODO(binary-skip): only text patch should remain, assert_eq!(patchset.len(), 1)
+        assert_eq!(patchset.len(), 2);
+
+        // First is text (1 hunk)
+        assert_eq!(patchset.patches()[0].patch().hunks().len(), 1);
+
+        // Second is binary (0 hunks)
+        assert!(patchset.patches()[1].patch().hunks().is_empty());
+    }
+
+    #[test]
+    fn multiple_binary_files() {
+        // Multiple binary files in one patchset
+        let content = "\
+diff --git a/a.png b/a.png
+new file mode 100644
+index 0000000..1111111
+Binary files /dev/null and b/a.png differ
+diff --git a/b.png b/b.png
+new file mode 100644
+index 0000000..2222222
+Binary files /dev/null and b/b.png differ
+";
+        let patchset = PatchSet::parse(content, ParseMode::GitDiff).unwrap();
+
+        // Current behavior: both binary patches are parsed
+        // TODO(binary-skip): should be empty, assert patchset.is_empty()
+        assert_eq!(patchset.len(), 2);
+        assert!(patchset.patches()[0].patch().hunks().is_empty());
+        assert!(patchset.patches()[1].patch().hunks().is_empty());
     }
 
     #[test]
