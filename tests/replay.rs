@@ -271,30 +271,38 @@ fn process_commit(repo: &PathBuf, parent: &str, child: &str, mode: TestMode) -> 
 
     // Calculate expected file count BEFORE parsing.
     // This allows early return for binary-only commits.
-    //
-    // `--numstat` format:
-    // - `added\tdeleted\tpath` for text files
-    // - `-\t-\tpath` for binary files
-    // - `0\t0\tpath` for empty/no-content changes
-    let numstat_output = match mode {
-        TestMode::UniDiff => git(repo, &["diff", "--numstat", "--no-renames", parent, child]),
-        TestMode::GitDiff => git(repo, &["diff", "--numstat", parent, child]),
+    let (expected_file_count, skipped_file_count) = match mode {
+        TestMode::UniDiff => {
+            // `--numstat` format:
+            // - `added\tdeleted\tpath` for text files
+            // - `-\t-\tpath` for binary files
+            // - `0\t0\tpath` for empty/no-content changes
+            let numstat = git(repo, &["diff", "--numstat", "--no-renames", parent, child]);
+            numstat
+                .lines()
+                .filter(|l| !l.is_empty())
+                .fold((0, 0), |(expected, skipped), line| {
+                    if line.starts_with("-\t-\t") || line.starts_with("0\t0\t") {
+                        (expected, skipped + 1)
+                    } else {
+                        (expected + 1, skipped)
+                    }
+                })
+        }
+        TestMode::GitDiff => {
+            // Can't use `--numstat` for GitDiff: it shows `-\t-\t` for both
+            // actual binary diffs AND pure binary renames (100% similarity).
+            // Parser correctly handles pure renames (rename headers, no binary content).
+            // Use `--raw` for total count, subtract actual binary markers from diff.
+            let raw = git(repo, &["diff", "--raw", parent, child]);
+            let total = raw.lines().filter(|l| !l.is_empty()).count();
+            let binary = diff_output
+                .lines()
+                .filter(|l| l.starts_with("Binary files ") || l.starts_with("GIT binary patch"))
+                .count();
+            (total - binary, binary)
+        }
     };
-    let (expected_file_count, skipped_file_count) = numstat_output
-        .lines()
-        .filter(|l| !l.is_empty())
-        .fold((0, 0), |(expected, skipped), line| {
-            // Binary files (`-\t-\t`) are skipped in both modes
-            if line.starts_with("-\t-\t") {
-                return (expected, skipped + 1);
-            }
-            // In UniDiff mode, also exclude empty/no-content changes (`0\t0\t`)
-            // because they have no hunks and no ---/+++ headers
-            if mode == TestMode::UniDiff && line.starts_with("0\t0\t") {
-                return (expected, skipped + 1);
-            }
-            (expected + 1, skipped)
-        });
     skipped += skipped_file_count;
 
     if expected_file_count == 0 {
