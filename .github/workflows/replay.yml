@@ -35,7 +35,6 @@ on:
 
 env:
   CARGO_INCREMENTAL: 0
-  RUST_BACKTRACE: 1
   CARGO_TERM_COLOR: always
   CLICOLOR: 1
   CI: 1
