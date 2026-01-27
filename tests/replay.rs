@@ -164,7 +164,7 @@ fn git(repo: &PathBuf, args: &[&str]) -> String {
         panic!("git {args:?} failed: {stderr}");
     }
 
-    String::from_utf8(output.stdout).expect("git output is not valid UTF-8")
+    String::from_utf8_lossy(&output.stdout).into_owned()
 }
 
 /// Check if a path is a submodule at a specific commit.
