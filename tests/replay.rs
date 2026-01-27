@@ -88,7 +88,6 @@ fn strip_path_prefix(path: &str, n: usize) -> String {
 
 /// Result of processing a single commit pair.
 struct CommitResult {
-    idx: usize,
     parent_short: String,
     child_short: String,
     files: Vec<String>,
@@ -211,13 +210,7 @@ fn commit_history(repo: &PathBuf, max: usize) -> Vec<String> {
     commits
 }
 
-fn process_commit(
-    repo: &PathBuf,
-    idx: usize,
-    parent: &str,
-    child: &str,
-    mode: TestMode,
-) -> CommitResult {
+fn process_commit(repo: &PathBuf, parent: &str, child: &str, mode: TestMode) -> CommitResult {
     let parent_short = parent[..8].to_string();
     let child_short = child[..8].to_string();
     let mut files = Vec::new();
@@ -234,7 +227,6 @@ fn process_commit(
     if diff_output.is_empty() {
         // No changes (could be metadata-only commit)
         return CommitResult {
-            idx,
             parent_short,
             child_short,
             files,
@@ -273,7 +265,6 @@ fn process_commit(
 
     if expected_file_count == 0 {
         return CommitResult {
-            idx,
             parent_short,
             child_short,
             files,
@@ -397,7 +388,6 @@ fn process_commit(
     }
 
     CommitResult {
-        idx,
         parent_short,
         child_short,
         files,
@@ -407,7 +397,7 @@ fn process_commit(
 }
 
 #[test]
-fn test_replay() {
+fn replay() {
     let repo = repo_path();
     let max = max_commits();
     let mode = test_mode();
@@ -427,44 +417,36 @@ fn test_replay() {
         TestMode::UniDiff => "unidiff",
     };
 
-    // Shared state for ordered progress reporting
+    // Shared state for progress reporting
     struct Progress {
-        results: Vec<Option<CommitResult>>,
-        next_to_print: usize,
+        completed: usize,
         total_applied: usize,
         total_skipped: usize,
     }
 
     let progress = Mutex::new(Progress {
-        results: (0..total_diffs).map(|_| None).collect(),
-        next_to_print: 0,
+        completed: 0,
         total_applied: 0,
         total_skipped: 0,
     });
 
     (0..total_diffs).into_par_iter().for_each(|i| {
-        let result = process_commit(&repo, i, &commits[i], &commits[i + 1], mode);
+        let result = process_commit(&repo, &commits[i], &commits[i + 1], mode);
 
-        let mut p = progress.lock().unwrap();
-        p.results[i] = Some(result);
-
-        // Print all consecutive completed results starting from next_to_print
-        while p.next_to_print < total_diffs {
-            let slot = p.next_to_print;
-            let Some(result) = p.results[slot].take() else {
-                break;
-            };
-            let display_idx = result.idx + 1;
-            eprintln!(
-                "[{display_idx}/{total_diffs}] ({repo_name}, {mode_name}) Processing {}..{}",
-                result.parent_short, result.child_short
-            );
-            for desc in &result.files {
-                eprintln!("  ✓ {desc}");
-            }
+        let completed = {
+            let mut p = progress.lock().unwrap();
+            p.completed += 1;
             p.total_applied += result.applied;
             p.total_skipped += result.skipped;
-            p.next_to_print += 1;
+            p.completed
+        };
+
+        eprintln!(
+            "[{completed}/{total_diffs}] ({repo_name}, {mode_name}) Processing {}..{}",
+            result.parent_short, result.child_short
+        );
+        for desc in &result.files {
+            eprintln!("  ✓ {desc}");
         }
     });
 
