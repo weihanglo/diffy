@@ -13,7 +13,9 @@
 //!
 //! * `DIFFY_TEST_REPO`: Path to the git repository to test against.
 //!   Defaults to the package directory (`CARGO_MANIFEST_DIR`).
-//! * `DIFFY_TEST_COMMITS`: Maximum number of commits to verify.
+//! * `DIFFY_TEST_COMMITS`: Commits to verify. Accepts either:
+//!   * A number (e.g., `200`) for the last N commits from HEAD
+//!   * A range (e.g., `abc123..def456`) for a specific commit range
 //!   Defaults to 200. Use `0` to verify entire history.
 //! * `DIFFY_TEST_PARSE_MODE`: Parse mode to use (`unidiff` or `gitdiff`).
 //!   Defaults to `unidiff`.
@@ -74,6 +76,14 @@ impl From<TestMode> for ParseOptions {
     }
 }
 
+/// Commit selection for replay testing.
+enum CommitSelection {
+    /// Last N commits from HEAD.
+    Last(usize),
+    /// Specific commit range (from..to).
+    Range { from: String, to: String },
+}
+
 /// Strip the first `n` path components from a path.
 fn strip_path_prefix(path: &str, n: usize) -> String {
     let mut remaining = path;
@@ -88,7 +98,6 @@ fn strip_path_prefix(path: &str, n: usize) -> String {
 
 /// Result of processing a single commit pair.
 struct CommitResult {
-    idx: usize,
     parent_short: String,
     child_short: String,
     files: Vec<String>,
@@ -105,16 +114,28 @@ fn repo_path() -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")))
 }
 
-fn max_commits() -> usize {
+fn commit_selection() -> CommitSelection {
     let Ok(val) = env::var("DIFFY_TEST_COMMITS") else {
-        return 200;
+        return CommitSelection::Last(200);
     };
     let val = val.trim();
+
+    // Check for range syntax (from..to)
+    if let Some((from, to)) = val.split_once("..") {
+        return CommitSelection::Range {
+            from: from.to_string(),
+            to: to.to_string(),
+        };
+    }
+
+    // Parse as number
     if val == "0" {
-        usize::MAX
+        CommitSelection::Last(usize::MAX)
     } else {
-        val.parse()
-            .unwrap_or_else(|e| panic!("invalid DIFFY_TEST_COMMITS='{val}': {e}"))
+        let n = val
+            .parse()
+            .unwrap_or_else(|e| panic!("invalid DIFFY_TEST_COMMITS='{val}': {e}"));
+        CommitSelection::Last(n)
     }
 }
 
@@ -192,32 +213,38 @@ fn file_at_commit(repo: &PathBuf, commit: &str, path: &str) -> Option<String> {
 }
 
 /// Get the list of commits from oldest to newest.
-fn commit_history(repo: &PathBuf, max: usize) -> Vec<String> {
-    // We want newest N in chronological order, so: fetch newest, then reverse.
-    // Use --first-parent to ensure consecutive commits are actual parent-child pairs,
-    // not unrelated commits from different branches before a merge.
-    let output = if max == usize::MAX {
-        git(repo, &["rev-list", "--first-parent", "--reverse", "HEAD"])
-    } else {
-        // fetches only the most recent `max + 1` commits
-        // to have `max` commit pairs for diffing.
-        let n = (max + 1).to_string();
-        git(repo, &["rev-list", "--first-parent", "-n", &n, "HEAD"])
-    };
-    let mut commits: Vec<_> = output.lines().map(String::from).collect();
-    if max != usize::MAX {
-        commits.reverse();
+fn commit_history(repo: &PathBuf, selection: &CommitSelection) -> Vec<String> {
+    match selection {
+        CommitSelection::Last(max) => {
+            // We want newest N in chronological order, so: fetch newest, then reverse.
+            // Use --first-parent to ensure consecutive commits are actual parent-child pairs,
+            // not unrelated commits from different branches before a merge.
+            let output = if *max == usize::MAX {
+                git(repo, &["rev-list", "--first-parent", "--reverse", "HEAD"])
+            } else {
+                // fetches only the most recent `max + 1` commits
+                // to have `max` commit pairs for diffing.
+                let n = (max + 1).to_string();
+                git(repo, &["rev-list", "--first-parent", "-n", &n, "HEAD"])
+            };
+            let mut commits: Vec<_> = output.lines().map(String::from).collect();
+            if *max != usize::MAX {
+                commits.reverse();
+            }
+            commits
+        }
+        CommitSelection::Range { from, to } => {
+            let range = format!("{from}..{to}");
+            let output = git(repo, &["rev-list", "--first-parent", "--reverse", &range]);
+            let mut commits: Vec<_> = output.lines().map(String::from).collect();
+            // Include 'from' commit as the base for diffing
+            commits.insert(0, from.clone());
+            commits
+        }
     }
-    commits
 }
 
-fn process_commit(
-    repo: &PathBuf,
-    idx: usize,
-    parent: &str,
-    child: &str,
-    mode: TestMode,
-) -> CommitResult {
+fn process_commit(repo: &PathBuf, parent: &str, child: &str, mode: TestMode) -> CommitResult {
     let parent_short = parent[..8].to_string();
     let child_short = child[..8].to_string();
     let mut files = Vec::new();
@@ -234,7 +261,6 @@ fn process_commit(
     if diff_output.is_empty() {
         // No changes (could be metadata-only commit)
         return CommitResult {
-            idx,
             parent_short,
             child_short,
             files,
@@ -245,35 +271,42 @@ fn process_commit(
 
     // Calculate expected file count BEFORE parsing.
     // This allows early return for binary-only commits.
-    //
-    // `--numstat` format:
-    // - `added\tdeleted\tpath` for text files
-    // - `-\t-\tpath` for binary files
-    // - `0\t0\tpath` for empty/no-content changes
-    let numstat_output = match mode {
-        TestMode::UniDiff => git(repo, &["diff", "--numstat", "--no-renames", parent, child]),
-        TestMode::GitDiff => git(repo, &["diff", "--numstat", parent, child]),
+    let (expected_file_count, skipped_file_count) = match mode {
+        TestMode::UniDiff => {
+            // `--numstat` format:
+            // - `added\tdeleted\tpath` for text files
+            // - `-\t-\tpath` for binary files
+            // - `0\t0\tpath` for empty/no-content changes
+            let numstat = git(repo, &["diff", "--numstat", "--no-renames", parent, child]);
+            numstat
+                .lines()
+                .filter(|l| !l.is_empty())
+                .fold((0, 0), |(expected, skipped), line| {
+                    if line.starts_with("-\t-\t") || line.starts_with("0\t0\t") {
+                        (expected, skipped + 1)
+                    } else {
+                        (expected + 1, skipped)
+                    }
+                })
+        }
+        TestMode::GitDiff => {
+            // Can't use `--numstat` for GitDiff: it shows `-\t-\t` for both
+            // actual binary diffs AND pure binary renames (100% similarity).
+            // Parser correctly handles pure renames (rename headers, no binary content).
+            // Use `--raw` for total count, subtract actual binary markers from diff.
+            let raw = git(repo, &["diff", "--raw", parent, child]);
+            let total = raw.lines().filter(|l| !l.is_empty()).count();
+            let binary = diff_output
+                .lines()
+                .filter(|l| l.starts_with("Binary files ") || l.starts_with("GIT binary patch"))
+                .count();
+            (total - binary, binary)
+        }
     };
-    let (expected_file_count, skipped_file_count) = numstat_output
-        .lines()
-        .filter(|l| !l.is_empty())
-        .fold((0, 0), |(expected, skipped), line| {
-            // Binary files (`-\t-\t`) are skipped in both modes
-            if line.starts_with("-\t-\t") {
-                return (expected, skipped + 1);
-            }
-            // In UniDiff mode, also exclude empty/no-content changes (`0\t0\t`)
-            // because they have no hunks and no ---/+++ headers
-            if mode == TestMode::UniDiff && line.starts_with("0\t0\t") {
-                return (expected, skipped + 1);
-            }
-            (expected + 1, skipped)
-        });
     skipped += skipped_file_count;
 
     if expected_file_count == 0 {
         return CommitResult {
-            idx,
             parent_short,
             child_short,
             files,
@@ -397,7 +430,6 @@ fn process_commit(
     }
 
     CommitResult {
-        idx,
         parent_short,
         child_short,
         files,
@@ -407,11 +439,11 @@ fn process_commit(
 }
 
 #[test]
-fn test_replay() {
+fn replay() {
     let repo = repo_path();
-    let max = max_commits();
+    let selection = commit_selection();
     let mode = test_mode();
-    let commits = commit_history(&repo, max);
+    let commits = commit_history(&repo, &selection);
 
     if commits.len() < 2 {
         panic!("Not enough commits to test");
@@ -427,44 +459,36 @@ fn test_replay() {
         TestMode::UniDiff => "unidiff",
     };
 
-    // Shared state for ordered progress reporting
+    // Shared state for progress reporting
     struct Progress {
-        results: Vec<Option<CommitResult>>,
-        next_to_print: usize,
+        completed: usize,
         total_applied: usize,
         total_skipped: usize,
     }
 
     let progress = Mutex::new(Progress {
-        results: (0..total_diffs).map(|_| None).collect(),
-        next_to_print: 0,
+        completed: 0,
         total_applied: 0,
         total_skipped: 0,
     });
 
     (0..total_diffs).into_par_iter().for_each(|i| {
-        let result = process_commit(&repo, i, &commits[i], &commits[i + 1], mode);
+        let result = process_commit(&repo, &commits[i], &commits[i + 1], mode);
 
-        let mut p = progress.lock().unwrap();
-        p.results[i] = Some(result);
-
-        // Print all consecutive completed results starting from next_to_print
-        while p.next_to_print < total_diffs {
-            let slot = p.next_to_print;
-            let Some(result) = p.results[slot].take() else {
-                break;
-            };
-            let display_idx = result.idx + 1;
-            eprintln!(
-                "[{display_idx}/{total_diffs}] ({repo_name}, {mode_name}) Processing {}..{}",
-                result.parent_short, result.child_short
-            );
-            for desc in &result.files {
-                eprintln!("  ✓ {desc}");
-            }
+        let completed = {
+            let mut p = progress.lock().unwrap();
+            p.completed += 1;
             p.total_applied += result.applied;
             p.total_skipped += result.skipped;
-            p.next_to_print += 1;
+            p.completed
+        };
+
+        eprintln!(
+            "[{completed}/{total_diffs}] ({repo_name}, {mode_name}) Processing {}..{}",
+            result.parent_short, result.child_short
+        );
+        for desc in &result.files {
+            eprintln!("  ✓ {desc}");
         }
     });
 

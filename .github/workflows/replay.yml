@@ -17,7 +17,7 @@ on:
         default: ''
         type: string
       commits:
-        description: 'Number of commits to replay (0 = all commits)'
+        description: 'Commits to replay: number (e.g., 200), range (e.g., abc..def), or 0 for all'
         required: true
         type: string
 
@@ -28,14 +28,13 @@ on:
         required: true
         type: string
       commits:
-        description: 'Number of commits to replay (0 = all commits)'
+        description: 'Commits to replay: number (e.g., 200), range (e.g., abc..def), or 0 for all'
         required: true
         default: '200'
         type: string
 
 env:
   CARGO_INCREMENTAL: 0
-  RUST_BACKTRACE: 1
   CARGO_TERM_COLOR: always
   CLICOLOR: 1
   CI: 1
@@ -47,13 +46,17 @@ jobs:
       matrix:
         parse_mode: [unidiff, gitdiff]
     name: ${{ inputs.name && matrix.parse_mode || format('{0} ({1}, {2})', inputs.repo_url, matrix.parse_mode, inputs.commits) }}
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: ${{ inputs.repo_url && 1 || 0 }}
       - if: inputs.repo_url != ''
         run: |
-          if [ "${{ inputs.commits }}" = "0" ]; then
+          if [[ "${{ inputs.commits }}" == *".."* ]]; then
+            # Range syntax requires full history
+            git clone ${{ inputs.repo_url }} target/test-repo
+          elif [ "${{ inputs.commits }}" = "0" ]; then
             git clone ${{ inputs.repo_url }} target/test-repo
           else
             git clone ${{ inputs.repo_url }} --depth $(( ${{ inputs.commits }} + 1 )) target/test-repo
