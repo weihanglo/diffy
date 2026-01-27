@@ -29,3 +29,6 @@ test = false
 [dev-dependencies]
 rayon = "1.10"
 snapbox = { version = "0.6.24", features = ["dir"] }
+
+[lints.clippy]
+mod_module_files = "deny"
