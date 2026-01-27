@@ -13,7 +13,9 @@
 //!
 //! * `DIFFY_TEST_REPO`: Path to the git repository to test against.
 //!   Defaults to the package directory (`CARGO_MANIFEST_DIR`).
-//! * `DIFFY_TEST_COMMITS`: Maximum number of commits to verify.
+//! * `DIFFY_TEST_COMMITS`: Commits to verify. Accepts either:
+//!   * A number (e.g., `200`) for the last N commits from HEAD
+//!   * A range (e.g., `abc123..def456`) for a specific commit range
 //!   Defaults to 200. Use `0` to verify entire history.
 //! * `DIFFY_TEST_PARSE_MODE`: Parse mode to use (`unidiff` or `gitdiff`).
 //!   Defaults to `unidiff`.
@@ -74,6 +76,14 @@ impl From<TestMode> for ParseOptions {
     }
 }
 
+/// Commit selection for replay testing.
+enum CommitSelection {
+    /// Last N commits from HEAD.
+    Last(usize),
+    /// Specific commit range (from..to).
+    Range { from: String, to: String },
+}
+
 /// Strip the first `n` path components from a path.
 fn strip_path_prefix(path: &str, n: usize) -> String {
     let mut remaining = path;
@@ -104,16 +114,28 @@ fn repo_path() -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")))
 }
 
-fn max_commits() -> usize {
+fn commit_selection() -> CommitSelection {
     let Ok(val) = env::var("DIFFY_TEST_COMMITS") else {
-        return 200;
+        return CommitSelection::Last(200);
     };
     let val = val.trim();
+
+    // Check for range syntax (from..to)
+    if let Some((from, to)) = val.split_once("..") {
+        return CommitSelection::Range {
+            from: from.to_string(),
+            to: to.to_string(),
+        };
+    }
+
+    // Parse as number
     if val == "0" {
-        usize::MAX
+        CommitSelection::Last(usize::MAX)
     } else {
-        val.parse()
-            .unwrap_or_else(|e| panic!("invalid DIFFY_TEST_COMMITS='{val}': {e}"))
+        let n = val
+            .parse()
+            .unwrap_or_else(|e| panic!("invalid DIFFY_TEST_COMMITS='{val}': {e}"));
+        CommitSelection::Last(n)
     }
 }
 
@@ -191,23 +213,35 @@ fn file_at_commit(repo: &PathBuf, commit: &str, path: &str) -> Option<String> {
 }
 
 /// Get the list of commits from oldest to newest.
-fn commit_history(repo: &PathBuf, max: usize) -> Vec<String> {
-    // We want newest N in chronological order, so: fetch newest, then reverse.
-    // Use --first-parent to ensure consecutive commits are actual parent-child pairs,
-    // not unrelated commits from different branches before a merge.
-    let output = if max == usize::MAX {
-        git(repo, &["rev-list", "--first-parent", "--reverse", "HEAD"])
-    } else {
-        // fetches only the most recent `max + 1` commits
-        // to have `max` commit pairs for diffing.
-        let n = (max + 1).to_string();
-        git(repo, &["rev-list", "--first-parent", "-n", &n, "HEAD"])
-    };
-    let mut commits: Vec<_> = output.lines().map(String::from).collect();
-    if max != usize::MAX {
-        commits.reverse();
+fn commit_history(repo: &PathBuf, selection: &CommitSelection) -> Vec<String> {
+    match selection {
+        CommitSelection::Last(max) => {
+            // We want newest N in chronological order, so: fetch newest, then reverse.
+            // Use --first-parent to ensure consecutive commits are actual parent-child pairs,
+            // not unrelated commits from different branches before a merge.
+            let output = if *max == usize::MAX {
+                git(repo, &["rev-list", "--first-parent", "--reverse", "HEAD"])
+            } else {
+                // fetches only the most recent `max + 1` commits
+                // to have `max` commit pairs for diffing.
+                let n = (max + 1).to_string();
+                git(repo, &["rev-list", "--first-parent", "-n", &n, "HEAD"])
+            };
+            let mut commits: Vec<_> = output.lines().map(String::from).collect();
+            if *max != usize::MAX {
+                commits.reverse();
+            }
+            commits
+        }
+        CommitSelection::Range { from, to } => {
+            let range = format!("{from}..{to}");
+            let output = git(repo, &["rev-list", "--first-parent", "--reverse", &range]);
+            let mut commits: Vec<_> = output.lines().map(String::from).collect();
+            // Include 'from' commit as the base for diffing
+            commits.insert(0, from.clone());
+            commits
+        }
     }
-    commits
 }
 
 fn process_commit(repo: &PathBuf, parent: &str, child: &str, mode: TestMode) -> CommitResult {
@@ -399,9 +433,9 @@ fn process_commit(repo: &PathBuf, parent: &str, child: &str, mode: TestMode) -> 
 #[test]
 fn replay() {
     let repo = repo_path();
-    let max = max_commits();
+    let selection = commit_selection();
     let mode = test_mode();
-    let commits = commit_history(&repo, max);
+    let commits = commit_history(&repo, &selection);
 
     if commits.len() < 2 {
         panic!("Not enough commits to test");
