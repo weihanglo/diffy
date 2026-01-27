@@ -3,10 +3,12 @@ mod parse;
 #[cfg(feature = "color")]
 mod style;
 
+use std::borrow::Cow;
+use std::fmt;
+use std::ops;
+
 pub use format::PatchFormatter;
 pub use parse::ParsePatchError;
-
-use std::{borrow::Cow, fmt, ops};
 
 use crate::utils::ESCAPED_CHARS;
 use crate::utils::ESCAPED_CHARS_BYTES;

@@ -1,5 +1,8 @@
-use crate::range::{DiffRange, Range};
-use std::ops::{Index, IndexMut};
+use std::ops::Index;
+use std::ops::IndexMut;
+
+use crate::range::DiffRange;
+use crate::range::Range;
 
 // A D-path is a path which starts at (0,0) that has exactly D non-diagonal edges. All D-paths
 // consist of a (D - 1)-path followed by a non-diagonal edge and then a possibly empty sequence of

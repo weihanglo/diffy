@@ -1,4 +1,6 @@
-use std::{cmp, fmt::Debug, ops};
+use std::cmp;
+use std::fmt::Debug;
+use std::ops;
 
 // Range type inspired by the Range type used in [dissimilar](https://docs.rs/dissimilar)
 #[derive(Debug)]

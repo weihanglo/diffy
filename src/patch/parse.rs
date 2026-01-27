@@ -1,11 +1,16 @@
 //! Parse a Patch
 
-use super::{Hunk, HunkRange, Line, NO_NEWLINE_AT_EOF};
-use crate::{
-    patch::Patch,
-    utils::{escaped_filename, LineIter, Text},
-};
-use std::{borrow::Cow, fmt};
+use std::borrow::Cow;
+use std::fmt;
+
+use super::Hunk;
+use super::HunkRange;
+use super::Line;
+use super::NO_NEWLINE_AT_EOF;
+use crate::patch::Patch;
+use crate::utils::escaped_filename;
+use crate::utils::LineIter;
+use crate::utils::Text;
 
 type Result<T, E = ParsePatchError> = std::result::Result<T, E>;
 
@@ -355,7 +360,8 @@ fn strip_newline<T: Text + ?Sized>(s: &T) -> Result<&T> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse, parse_bytes};
+    use super::parse;
+    use super::parse_bytes;
 
     #[test]
     fn trailing_garbage_after_complete_hunk() {

@@ -53,11 +53,10 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Mutex;
 
-use rayon::prelude::*;
-
 use diffy::patchset::FileOperation;
 use diffy::patchset::ParseOptions;
 use diffy::patchset::PatchSet;
+use rayon::prelude::*;
 
 /// Local enum for test configuration (maps to ParseOptions).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
