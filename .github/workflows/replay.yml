@@ -40,8 +40,7 @@ jobs:
     strategy:
       matrix:
         parse_mode: [unidiff, gitdiff]
-    name: ${{ inputs.name && matrix.parse_mode || format('{0} ({1})', inputs.repo_url, matrix.parse_mode) }}
-    continue-on-error: ${{ matrix.parse_mode == 'gitdiff' }}
+    name: ${{ inputs.name && matrix.parse_mode || format('{0} ({1}, {2})', inputs.repo_url, matrix.parse_mode, inputs.commits) }}
     steps:
       - uses: actions/checkout@v6
         with:

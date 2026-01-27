@@ -1,9 +1,11 @@
-use crate::{
-    diff::DiffOptions,
-    range::{DiffRange, Range, SliceLike},
-    utils::Classifier,
-};
-use std::{cmp, fmt};
+use std::cmp;
+use std::fmt;
+
+use crate::diff::DiffOptions;
+use crate::range::DiffRange;
+use crate::range::Range;
+use crate::range::SliceLike;
+use crate::utils::Classifier;
 
 #[cfg(test)]
 mod tests;

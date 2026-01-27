@@ -1,11 +1,14 @@
-use std::{
-    fmt::{Display, Formatter, Result},
-    io,
-};
+use std::fmt::Display;
+use std::fmt::Formatter;
+use std::fmt::Result;
+use std::io;
 
 #[cfg(feature = "color")]
 use super::style;
-use super::{Hunk, Line, Patch, NO_NEWLINE_AT_EOF};
+use super::Hunk;
+use super::Line;
+use super::Patch;
+use super::NO_NEWLINE_AT_EOF;
 
 /// Struct used to adjust the formatting of a `Patch`
 #[derive(Debug)]

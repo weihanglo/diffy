@@ -1,10 +1,9 @@
 //! Common utilities
 
-use std::{
-    borrow::Cow,
-    collections::{hash_map::Entry, HashMap},
-    hash::Hash,
-};
+use std::borrow::Cow;
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
+use std::hash::Hash;
 
 use crate::ParsePatchError;
 

@@ -51,12 +51,12 @@
 use std::env;
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::mpsc;
-use std::thread;
+use std::sync::Mutex;
 
 use diffy::patchset::FileOperation;
 use diffy::patchset::ParseOptions;
 use diffy::patchset::PatchSet;
+use rayon::prelude::*;
 
 /// Local enum for test configuration (maps to ParseOptions).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -427,47 +427,53 @@ fn test_replay() {
         TestMode::UniDiff => "unidiff",
     };
 
-    let (tx, rx) = mpsc::channel::<CommitResult>();
-    let repo = &repo;
+    // Shared state for ordered progress reporting
+    struct Progress {
+        results: Vec<Option<CommitResult>>,
+        next_to_print: usize,
+        total_applied: usize,
+        total_skipped: usize,
+    }
 
-    thread::scope(|s| {
-        for (i, window) in commits.windows(2).enumerate() {
-            let tx = tx.clone();
-            let parent = &window[0];
-            let child = &window[1];
+    let progress = Mutex::new(Progress {
+        results: (0..total_diffs).map(|_| None).collect(),
+        next_to_print: 0,
+        total_applied: 0,
+        total_skipped: 0,
+    });
 
-            s.spawn(move || {
-                let result = process_commit(repo, i, parent, child, mode);
-                tx.send(result).expect("failed to send result");
-            });
-        }
+    (0..total_diffs).into_par_iter().for_each(|i| {
+        let result = process_commit(&repo, i, &commits[i], &commits[i + 1], mode);
 
-        drop(tx);
+        let mut p = progress.lock().unwrap();
+        p.results[i] = Some(result);
 
-        let mut results: Vec<_> = rx.iter().collect();
-        results.sort_by_key(|r| r.idx);
-
-        let mut total_applied = 0;
-        let mut total_skipped = 0;
-
-        for result in results {
-            let idx = result.idx + 1;
+        // Print all consecutive completed results starting from next_to_print
+        while p.next_to_print < total_diffs {
+            let slot = p.next_to_print;
+            let Some(result) = p.results[slot].take() else {
+                break;
+            };
+            let display_idx = result.idx + 1;
             eprintln!(
-                "[{idx}/{total_diffs}] ({repo_name}, {mode_name}) Processing {}..{}",
+                "[{display_idx}/{total_diffs}] ({repo_name}, {mode_name}) Processing {}..{}",
                 result.parent_short, result.child_short
             );
             for desc in &result.files {
                 eprintln!("  ✓ {desc}");
             }
-            total_applied += result.applied;
-            total_skipped += result.skipped;
+            p.total_applied += result.applied;
+            p.total_skipped += result.skipped;
+            p.next_to_print += 1;
         }
-
-        eprintln!(
-            "History replay completed: {total_applied} patches applied, {total_skipped} skipped"
-        );
-
-        // Sanity check: we should have applied at least some patches
-        assert!(total_applied > 0, "No patches were applied");
     });
+
+    let p = progress.lock().unwrap();
+    eprintln!(
+        "History replay completed: {} patches applied, {} skipped",
+        p.total_applied, p.total_skipped
+    );
+
+    // Sanity check: we should have applied at least some patches
+    assert!(p.total_applied > 0, "No patches were applied");
 }

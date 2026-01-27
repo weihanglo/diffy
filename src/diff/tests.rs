@@ -1,11 +1,10 @@
 use super::*;
-use crate::{
-    apply::apply,
-    diff::{Diff, DiffRange},
-    patch::Patch,
-    range::Range,
-    PatchFormatter,
-};
+use crate::apply::apply;
+use crate::diff::Diff;
+use crate::diff::DiffRange;
+use crate::patch::Patch;
+use crate::range::Range;
+use crate::PatchFormatter;
 
 // Helper macros are based off of the ones used in [dissimilar](https://docs.rs/dissimilar)
 macro_rules! diff_range_list {

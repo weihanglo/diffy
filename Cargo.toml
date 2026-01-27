@@ -27,4 +27,5 @@ name = "replay"
 test = false
 
 [dev-dependencies]
+rayon = "1.10"
 snapbox = { version = "0.6.24", features = ["dir"] }

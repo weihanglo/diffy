@@ -7,9 +7,10 @@ mod parse;
 #[cfg(test)]
 mod tests;
 
-use crate::Patch;
 use std::borrow::Cow;
 use std::fmt;
+
+use crate::Patch;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) enum Format {

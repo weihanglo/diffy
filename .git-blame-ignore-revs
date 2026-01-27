@@ -1,0 +1,4 @@
+# Use `git config blame.ignorerevsfile .git-blame-ignore-revs` to make `git blame` ignore the following commits.
+
+# chore: rustfmt
+30b6750d0b27438be538c1618bc68e1236a058e3

@@ -1,8 +1,10 @@
-use crate::{
-    patch::{Hunk, Line, Patch},
-    utils::LineIter,
-};
-use std::{fmt, iter};
+use std::fmt;
+use std::iter;
+
+use crate::patch::Hunk;
+use crate::patch::Line;
+use crate::patch::Patch;
+use crate::utils::LineIter;
 
 /// An error returned when [`apply`]ing a `Patch` fails
 ///

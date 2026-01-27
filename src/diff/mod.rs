@@ -1,9 +1,14 @@
-use crate::{
-    patch::{Hunk, HunkRange, Line, Patch},
-    range::{DiffRange, SliceLike},
-    utils::Classifier,
-};
-use std::{borrow::Cow, cmp, ops};
+use std::borrow::Cow;
+use std::cmp;
+use std::ops;
+
+use crate::patch::Hunk;
+use crate::patch::HunkRange;
+use crate::patch::Line;
+use crate::patch::Patch;
+use crate::range::DiffRange;
+use crate::range::SliceLike;
+use crate::utils::Classifier;
 
 mod cleanup;
 mod myers;
