@@ -1,5 +1,8 @@
 name: CI
 
+permissions:
+  contents: read
+
 on:
   push:
     branches:
@@ -9,7 +12,14 @@ on:
 
 env:
   CARGO_INCREMENTAL: 0
-  CI: "1"
+  RUST_BACKTRACE: 1
+  CARGO_TERM_COLOR: always
+  CLICOLOR: 1
+  CI: 1
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
 
 jobs:
   test:
@@ -34,6 +44,13 @@ jobs:
       - run: cargo fmt -- --check
       - run: cargo clippy --all-targets
       - run: cargo doc --no-deps
+
+  semver:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Check semver
+        uses: obi1kenobi/cargo-semver-checks-action@v2
 
   replay:
     strategy:
