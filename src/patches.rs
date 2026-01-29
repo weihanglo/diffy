@@ -52,7 +52,7 @@ pub(crate) enum Binary {
 /// ## Example
 ///
 /// ```
-/// use diffy::patchset::{ParseOptions, Patches};
+/// use diffy::patches::{ParseOptions, Patches};
 ///
 /// let input = "diff --git a/img.png b/img.png\nBinary files differ\n";
 /// let patches: Vec<_> = Patches::parse(input, ParseOptions::gitdiff())

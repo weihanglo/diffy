@@ -8,10 +8,10 @@ use std::process::Command;
 use std::process::Stdio;
 use std::sync::Once;
 
-use diffy::patchset::FileOperation;
-use diffy::patchset::ParseOptions;
-use diffy::patchset::PatchSetParseError;
-use diffy::patchset::Patches;
+use diffy::patches::FileOperation;
+use diffy::patches::ParseOptions;
+use diffy::patches::PatchSetParseError;
+use diffy::patches::Patches;
 
 /// Which external tool to compare against.
 #[derive(Clone, Copy)]

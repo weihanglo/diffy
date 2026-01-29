@@ -32,7 +32,7 @@ const EMAIL_PREAMBLE_SEPARATOR: &str = "\n---\n";
 /// # Example
 ///
 /// ```
-/// use diffy::patchset::{Patches, ParseOptions};
+/// use diffy::patches::{Patches, ParseOptions};
 ///
 /// let s = "\
 /// diff --git a/file1.rs b/file1.rs

@@ -55,9 +55,9 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Mutex;
 
-use diffy::patchset::FileOperation;
-use diffy::patchset::ParseOptions;
-use diffy::patchset::Patches;
+use diffy::patches::FileOperation;
+use diffy::patches::ParseOptions;
+use diffy::patches::Patches;
 use rayon::prelude::*;
 
 /// Local enum for test configuration (maps to ParseOptions).
