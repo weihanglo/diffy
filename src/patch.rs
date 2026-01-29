@@ -1,5 +1,5 @@
 mod format;
-mod parse;
+pub(crate) mod parse;
 #[cfg(feature = "color")]
 mod style;
 

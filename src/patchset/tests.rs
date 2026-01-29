@@ -3,7 +3,7 @@
 use super::FileMode;
 use super::FileOperation;
 use super::ParseOptions;
-use super::PatchSet;
+use super::Patches;
 
 mod file_operation {
     use super::*;
@@ -51,26 +51,28 @@ diff --git a/file2.rs b/file2.rs
 -old2
 +new2
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::gitdiff()).unwrap();
-        assert_eq!(patchset.len(), 2);
+        let patches: Vec<_> = Patches::parse(content, ParseOptions::gitdiff())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 2);
 
         assert_eq!(
-            patchset.patches()[0].operation(),
+            patches[0].operation(),
             &FileOperation::Modify {
                 original: "a/file1.rs".to_owned().into(),
                 modified: "b/file1.rs".to_owned().into(),
             }
         );
-        assert_eq!(patchset.patches()[0].patch().hunks().len(), 1);
+        assert_eq!(patches[0].patch().hunks().len(), 1);
 
         assert_eq!(
-            patchset.patches()[1].operation(),
+            patches[1].operation(),
             &FileOperation::Modify {
                 original: "a/file2.rs".to_owned().into(),
                 modified: "b/file2.rs".to_owned().into(),
             }
         );
-        assert_eq!(patchset.patches()[1].patch().hunks().len(), 1);
+        assert_eq!(patches[1].patch().hunks().len(), 1);
     }
 
     #[test]
@@ -85,22 +87,21 @@ new mode 100755
 -old
 +new
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::gitdiff()).unwrap();
-        assert_eq!(patchset.len(), 1);
+        let patches = Patches::parse(content, ParseOptions::gitdiff())
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
 
         assert_eq!(
-            patchset.patches()[0].operation(),
+            patches[0].operation(),
             &FileOperation::Modify {
                 original: "a/file.rs".to_owned().into(),
                 modified: "b/file.rs".to_owned().into(),
             }
         );
-        assert_eq!(patchset.patches()[0].patch().hunks().len(), 1);
-        assert_eq!(patchset.patches()[0].old_mode(), Some(&FileMode::Regular));
-        assert_eq!(
-            patchset.patches()[0].new_mode(),
-            Some(&FileMode::Executable)
-        );
+        assert_eq!(patches[0].patch().hunks().len(), 1);
+        assert_eq!(patches[0].old_mode(), Some(&FileMode::Regular));
+        assert_eq!(patches[0].new_mode(), Some(&FileMode::Executable));
     }
 
     #[test]
@@ -113,19 +114,18 @@ new file mode 100755
 @@ -0,0 +1 @@
 +content
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::gitdiff()).unwrap();
-        assert_eq!(patchset.len(), 1);
+        let patches: Vec<_> = Patches::parse(content, ParseOptions::gitdiff())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
 
         assert_eq!(
-            patchset.patches()[0].operation(),
+            patches[0].operation(),
             &FileOperation::Create("b/new.sh".to_owned().into())
         );
-        assert_eq!(patchset.patches()[0].patch().hunks().len(), 1);
-        assert_eq!(patchset.patches()[0].old_mode(), None);
-        assert_eq!(
-            patchset.patches()[0].new_mode(),
-            Some(&FileMode::Executable)
-        );
+        assert_eq!(patches[0].patch().hunks().len(), 1);
+        assert_eq!(patches[0].old_mode(), None);
+        assert_eq!(patches[0].new_mode(), Some(&FileMode::Executable));
     }
 
     #[test]
@@ -138,19 +138,18 @@ deleted file mode 100755
 @@ -1 +0,0 @@
 -content
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::gitdiff()).unwrap();
-        assert_eq!(patchset.len(), 1);
+        let patches: Vec<_> = Patches::parse(content, ParseOptions::gitdiff())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
 
         assert_eq!(
-            patchset.patches()[0].operation(),
+            patches[0].operation(),
             &FileOperation::Delete("a/old.sh".to_owned().into())
         );
-        assert_eq!(patchset.patches()[0].patch().hunks().len(), 1);
-        assert_eq!(
-            patchset.patches()[0].old_mode(),
-            Some(&FileMode::Executable)
-        );
-        assert_eq!(patchset.patches()[0].new_mode(), None);
+        assert_eq!(patches[0].patch().hunks().len(), 1);
+        assert_eq!(patches[0].old_mode(), Some(&FileMode::Executable));
+        assert_eq!(patches[0].new_mode(), None);
     }
 
     #[test]
@@ -160,16 +159,18 @@ diff --git a/empty.txt b/empty.txt
 new file mode 100644
 index 0000000..e69de29
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::gitdiff()).unwrap();
-        assert_eq!(patchset.len(), 1);
+        let patches: Vec<_> = Patches::parse(content, ParseOptions::gitdiff())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
 
         assert_eq!(
-            patchset.patches()[0].operation(),
+            patches[0].operation(),
             &FileOperation::Create("b/empty.txt".to_owned().into())
         );
-        assert!(patchset.patches()[0].patch().hunks().is_empty());
-        assert_eq!(patchset.patches()[0].old_mode(), None);
-        assert_eq!(patchset.patches()[0].new_mode(), Some(&FileMode::Regular));
+        assert!(patches[0].patch().hunks().is_empty());
+        assert_eq!(patches[0].old_mode(), None);
+        assert_eq!(patches[0].new_mode(), Some(&FileMode::Regular));
     }
 
     #[test]
@@ -179,16 +180,18 @@ diff --git a/empty.txt b/empty.txt
 deleted file mode 100644
 index e69de29..0000000
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::gitdiff()).unwrap();
-        assert_eq!(patchset.len(), 1);
+        let patches: Vec<_> = Patches::parse(content, ParseOptions::gitdiff())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
 
         assert_eq!(
-            patchset.patches()[0].operation(),
+            patches[0].operation(),
             &FileOperation::Delete("a/empty.txt".to_owned().into())
         );
-        assert!(patchset.patches()[0].patch().hunks().is_empty());
-        assert_eq!(patchset.patches()[0].old_mode(), Some(&FileMode::Regular));
-        assert_eq!(patchset.patches()[0].new_mode(), None);
+        assert!(patches[0].patch().hunks().is_empty());
+        assert_eq!(patches[0].old_mode(), Some(&FileMode::Regular));
+        assert_eq!(patches[0].new_mode(), None);
     }
 
     #[test]
@@ -199,18 +202,20 @@ similarity index 100%
 rename from old.txt
 rename to new.txt
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::gitdiff()).unwrap();
-        assert_eq!(patchset.len(), 1);
+        let patches: Vec<_> = Patches::parse(content, ParseOptions::gitdiff())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
 
         assert_eq!(
-            patchset.patches()[0].operation(),
+            patches[0].operation(),
             &FileOperation::Rename {
                 from: "old.txt".to_owned().into(),
                 to: "new.txt".to_owned().into(),
             }
         );
         // Pure rename has no hunks
-        assert!(patchset.patches()[0].patch().hunks().is_empty());
+        assert!(patches[0].patch().hunks().is_empty());
     }
 
     #[test]
@@ -221,18 +226,20 @@ similarity index 100%
 copy from original.txt
 copy to copy.txt
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::gitdiff()).unwrap();
-        assert_eq!(patchset.len(), 1);
+        let patches: Vec<_> = Patches::parse(content, ParseOptions::gitdiff())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
 
         assert_eq!(
-            patchset.patches()[0].operation(),
+            patches[0].operation(),
             &FileOperation::Copy {
                 from: "original.txt".to_owned().into(),
                 to: "copy.txt".to_owned().into(),
             }
         );
         // Pure copy has no hunks
-        assert!(patchset.patches()[0].patch().hunks().is_empty());
+        assert!(patches[0].patch().hunks().is_empty());
     }
 
     #[test]
@@ -248,18 +255,20 @@ rename to new.txt
 -old content
 +new content
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::gitdiff()).unwrap();
-        assert_eq!(patchset.len(), 1);
+        let patches: Vec<_> = Patches::parse(content, ParseOptions::gitdiff())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
 
         assert_eq!(
-            patchset.patches()[0].operation(),
+            patches[0].operation(),
             &FileOperation::Rename {
                 from: "old.txt".to_owned().into(),
                 to: "new.txt".to_owned().into(),
             }
         );
         // Rename with changes has hunks
-        assert_eq!(patchset.patches()[0].patch().hunks().len(), 1);
+        assert_eq!(patches[0].patch().hunks().len(), 1);
     }
 
     #[test]
@@ -276,18 +285,20 @@ copy to copy.txt
  line2
 +line3
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::gitdiff()).unwrap();
-        assert_eq!(patchset.len(), 1);
+        let patches: Vec<_> = Patches::parse(content, ParseOptions::gitdiff())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
 
         assert_eq!(
-            patchset.patches()[0].operation(),
+            patches[0].operation(),
             &FileOperation::Copy {
                 from: "original.txt".to_owned().into(),
                 to: "copy.txt".to_owned().into(),
             }
         );
         // Copy with changes has hunks
-        assert_eq!(patchset.patches()[0].patch().hunks().len(), 1);
+        assert_eq!(patches[0].patch().hunks().len(), 1);
     }
 
     #[test]
@@ -301,24 +312,23 @@ similarity index 100%
 rename from file.sh
 rename to renamed.sh
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::gitdiff()).unwrap();
-        assert_eq!(patchset.len(), 1);
+        let patches: Vec<_> = Patches::parse(content, ParseOptions::gitdiff())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
 
         // Operation is Rename; mode change is orthogonal metadata
         assert_eq!(
-            patchset.patches()[0].operation(),
+            patches[0].operation(),
             &FileOperation::Rename {
                 from: "file.sh".to_owned().into(),
                 to: "renamed.sh".to_owned().into(),
             }
         );
-        assert!(patchset.patches()[0].patch().hunks().is_empty());
+        assert!(patches[0].patch().hunks().is_empty());
 
-        assert_eq!(patchset.patches()[0].old_mode(), Some(&FileMode::Regular));
-        assert_eq!(
-            patchset.patches()[0].new_mode(),
-            Some(&FileMode::Executable)
-        );
+        assert_eq!(patches[0].old_mode(), Some(&FileMode::Regular));
+        assert_eq!(patches[0].new_mode(), Some(&FileMode::Executable));
     }
 
     #[test]
@@ -340,11 +350,13 @@ diff --git a/file.rs b/file.rs
  real
 +change
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::gitdiff()).unwrap();
-        assert_eq!(patchset.len(), 1);
+        let patches: Vec<_> = Patches::parse(content, ParseOptions::gitdiff())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
 
         assert_eq!(
-            patchset.patches()[0].operation(),
+            patches[0].operation(),
             &FileOperation::Modify {
                 original: "a/file.rs".to_owned().into(),
                 modified: "b/file.rs".to_owned().into(),
@@ -359,24 +371,23 @@ diff --git a/script.sh b/script.sh
 old mode 100644
 new mode 100755
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::gitdiff()).unwrap();
-        assert_eq!(patchset.len(), 1);
+        let patches = Patches::parse(content, ParseOptions::gitdiff())
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
 
         // Mode-only change is represented as Modify with empty hunks
         assert_eq!(
-            patchset.patches()[0].operation(),
+            patches[0].operation(),
             &FileOperation::Modify {
                 original: "a/script.sh".to_owned().into(),
                 modified: "b/script.sh".to_owned().into(),
             }
         );
-        assert!(patchset.patches()[0].patch().hunks().is_empty());
+        assert!(patches[0].patch().hunks().is_empty());
 
-        assert_eq!(patchset.patches()[0].old_mode(), Some(&FileMode::Regular));
-        assert_eq!(
-            patchset.patches()[0].new_mode(),
-            Some(&FileMode::Executable)
-        );
+        assert_eq!(patches[0].old_mode(), Some(&FileMode::Regular));
+        assert_eq!(patches[0].new_mode(), Some(&FileMode::Executable));
     }
 
     #[test]
@@ -387,10 +398,12 @@ diff --git script.sh script.sh
 old mode 100644
 new mode 100755
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::gitdiff()).unwrap();
-        assert_eq!(patchset.len(), 1);
+        let patches: Vec<_> = Patches::parse(content, ParseOptions::gitdiff())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
         assert_eq!(
-            patchset.patches()[0].operation(),
+            patches[0].operation(),
             &FileOperation::Modify {
                 original: "script.sh".to_owned().into(),
                 modified: "script.sh".to_owned().into(),
@@ -405,10 +418,12 @@ diff --git a/script name.sh b/script name.sh
 old mode 100644
 new mode 100755
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::gitdiff()).unwrap();
-        assert_eq!(patchset.len(), 1);
+        let patches: Vec<_> = Patches::parse(content, ParseOptions::gitdiff())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
         assert_eq!(
-            patchset.patches()[0].operation(),
+            patches[0].operation(),
             &FileOperation::Modify {
                 original: "a/script name.sh".to_owned().into(),
                 modified: "b/script name.sh".to_owned().into(),
@@ -424,10 +439,12 @@ diff --git a/path/to/my b/file.txt b/path/to/my b/file.txt
 old mode 100644
 new mode 100755
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::gitdiff()).unwrap();
-        assert_eq!(patchset.len(), 1);
+        let patches: Vec<_> = Patches::parse(content, ParseOptions::gitdiff())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
         assert_eq!(
-            patchset.patches()[0].operation(),
+            patches[0].operation(),
             &FileOperation::Modify {
                 original: "a/path/to/my b/file.txt".to_owned().into(),
                 modified: "b/path/to/my b/file.txt".to_owned().into(),
@@ -442,10 +459,12 @@ diff --git src/script.sh dst/script.sh
 old mode 100644
 new mode 100755
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::gitdiff()).unwrap();
-        assert_eq!(patchset.len(), 1);
+        let patches: Vec<_> = Patches::parse(content, ParseOptions::gitdiff())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
         assert_eq!(
-            patchset.patches()[0].operation(),
+            patches[0].operation(),
             &FileOperation::Modify {
                 original: "src/script.sh".to_owned().into(),
                 modified: "dst/script.sh".to_owned().into(),
@@ -461,10 +480,12 @@ diff --git src/main/java/file.txt target/file.txt
 old mode 100644
 new mode 100755
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::gitdiff()).unwrap();
-        assert_eq!(patchset.len(), 1);
+        let patches: Vec<_> = Patches::parse(content, ParseOptions::gitdiff())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
         assert_eq!(
-            patchset.patches()[0].operation(),
+            patches[0].operation(),
             &FileOperation::Modify {
                 original: "src/main/java/file.txt".to_owned().into(),
                 modified: "target/file.txt".to_owned().into(),
@@ -480,10 +501,12 @@ diff --git \"a/file\\twith\\ttab.sh\" \"b/file\\twith\\ttab.sh\"
 old mode 100644
 new mode 100755
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::gitdiff()).unwrap();
-        assert_eq!(patchset.len(), 1);
+        let patches: Vec<_> = Patches::parse(content, ParseOptions::gitdiff())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
         assert_eq!(
-            patchset.patches()[0].operation(),
+            patches[0].operation(),
             &FileOperation::Modify {
                 original: "a/file\twith\ttab.sh".to_owned().into(),
                 modified: "b/file\twith\ttab.sh".to_owned().into(),
@@ -499,10 +522,12 @@ diff --git \"a\\t/script.sh\" b/script.sh
 old mode 100644
 new mode 100755
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::gitdiff()).unwrap();
-        assert_eq!(patchset.len(), 1);
+        let patches: Vec<_> = Patches::parse(content, ParseOptions::gitdiff())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
         assert_eq!(
-            patchset.patches()[0].operation(),
+            patches[0].operation(),
             &FileOperation::Modify {
                 original: "a\t/script.sh".to_owned().into(),
                 modified: "b/script.sh".to_owned().into(),
@@ -518,10 +543,12 @@ diff --git a/script.sh \"b\\t/script.sh\"
 old mode 100644
 new mode 100755
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::gitdiff()).unwrap();
-        assert_eq!(patchset.len(), 1);
+        let patches: Vec<_> = Patches::parse(content, ParseOptions::gitdiff())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
         assert_eq!(
-            patchset.patches()[0].operation(),
+            patches[0].operation(),
             &FileOperation::Modify {
                 original: "a/script.sh".to_owned().into(),
                 modified: "b\t/script.sh".to_owned().into(),
@@ -538,10 +565,12 @@ diff --git src/foo.rs src/foo.rs src/foo.rs src/foo.rs
 old mode 100644
 new mode 100755
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::gitdiff()).unwrap();
-        assert_eq!(patchset.len(), 1);
+        let patches: Vec<_> = Patches::parse(content, ParseOptions::gitdiff())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
         assert_eq!(
-            patchset.patches()[0].operation(),
+            patches[0].operation(),
             &FileOperation::Modify {
                 original: "src/foo.rs src/foo.rs".to_owned().into(),
                 modified: "src/foo.rs src/foo.rs".to_owned().into(),
@@ -557,10 +586,12 @@ diff --git fofoo/bar.rs foo/bar.rs
 old mode 100644
 new mode 100755
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::gitdiff()).unwrap();
-        assert_eq!(patchset.len(), 1);
+        let patches: Vec<_> = Patches::parse(content, ParseOptions::gitdiff())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
         assert_eq!(
-            patchset.patches()[0].operation(),
+            patches[0].operation(),
             &FileOperation::Modify {
                 original: "fofoo/bar.rs".to_owned().into(),
                 modified: "foo/bar.rs".to_owned().into(),
@@ -576,7 +607,8 @@ diff --git a/foo.rs b/bar.rs
 old mode 100644
 new mode 100755
 ";
-        assert!(PatchSet::parse(content, ParseOptions::gitdiff()).is_err());
+        let result: Result<Vec<_>, _> = Patches::parse(content, ParseOptions::gitdiff()).collect();
+        assert!(result.is_err());
     }
 
     #[test]
@@ -587,7 +619,8 @@ diff --git a/ b/
 old mode 100644
 new mode 100755
 ";
-        assert!(PatchSet::parse(content, ParseOptions::gitdiff()).is_err());
+        let result: Result<Vec<_>, _> = Patches::parse(content, ParseOptions::gitdiff()).collect();
+        assert!(result.is_err());
     }
 
     #[test]
@@ -597,10 +630,12 @@ diff --git a/image.png b/image.png
 index 1234567..89abcdef 100644
 Binary files a/image.png and b/image.png differ
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::gitdiff()).unwrap();
+        let patches = Patches::parse(content, ParseOptions::gitdiff())
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
 
         // Binary diffs are skipped by default
-        assert!(patchset.is_empty());
+        assert!(patches.is_empty());
     }
 
     #[test]
@@ -612,10 +647,12 @@ new file mode 100644
 index 0000000..db12d84
 Binary files /dev/null and b/binary.bin differ
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::gitdiff()).unwrap();
+        let patches = Patches::parse(content, ParseOptions::gitdiff())
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
 
         // Binary diffs are skipped by default
-        assert!(patchset.is_empty());
+        assert!(patches.is_empty());
     }
 
     #[test]
@@ -627,10 +664,12 @@ deleted file mode 100644
 index 19d44f5..0000000
 Binary files a/binary.bin and /dev/null differ
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::gitdiff()).unwrap();
+        let patches = Patches::parse(content, ParseOptions::gitdiff())
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
 
         // Binary diffs are skipped by default
-        assert!(patchset.is_empty());
+        assert!(patches.is_empty());
     }
 
     #[test]
@@ -648,10 +687,12 @@ literal 0
 KcmV+b0RR6000031
 
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::gitdiff()).unwrap();
+        let patches = Patches::parse(content, ParseOptions::gitdiff())
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
 
         // GIT binary patch format is also skipped
-        assert!(patchset.is_empty());
+        assert!(patches.is_empty());
     }
 
     #[test]
@@ -669,13 +710,15 @@ index c182a93..a39caff 100644
 -old content
 +new content
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::gitdiff()).unwrap();
+        let patches = Patches::parse(content, ParseOptions::gitdiff())
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
 
         // Only text patch remains, binary is skipped
-        assert_eq!(patchset.len(), 1);
-        assert_eq!(patchset.patches()[0].patch().hunks().len(), 1);
+        assert_eq!(patches.len(), 1);
+        assert_eq!(patches[0].patch().hunks().len(), 1);
         assert_eq!(
-            patchset.patches()[0].operation(),
+            patches[0].operation(),
             &FileOperation::Modify {
                 original: "a/text.txt".to_owned().into(),
                 modified: "b/text.txt".to_owned().into(),
@@ -696,11 +739,13 @@ diff --git a/text.txt b/text.txt
 diff --git a/binary.bin b/binary.bin
 Binary files a/binary.bin and b/binary.bin differ
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::gitdiff()).unwrap();
+        let patches = Patches::parse(content, ParseOptions::gitdiff())
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
 
         // Only text patch remains, binary is skipped
-        assert_eq!(patchset.len(), 1);
-        assert_eq!(patchset.patches()[0].patch().hunks().len(), 1);
+        assert_eq!(patches.len(), 1);
+        assert_eq!(patches[0].patch().hunks().len(), 1);
     }
 
     #[test]
@@ -716,10 +761,12 @@ new file mode 100644
 index 0000000..2222222
 Binary files /dev/null and b/b.png differ
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::gitdiff()).unwrap();
+        let patches = Patches::parse(content, ParseOptions::gitdiff())
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
 
         // All binary, so result is empty
-        assert!(patchset.is_empty());
+        assert!(patches.is_empty());
     }
 
     #[test]
@@ -730,7 +777,8 @@ diff --git a/image.png b/image.png
 index 1234567..89abcdef 100644
 Binary files a/image.png and b/image.png differ
 ";
-        let result = PatchSet::parse(content, ParseOptions::gitdiff().fail_on_binary());
+        let result: Result<Vec<_>, _> =
+            Patches::parse(content, ParseOptions::gitdiff().fail_on_binary()).collect();
 
         assert!(result.is_err());
         let err = result.unwrap_err();
@@ -750,7 +798,8 @@ diff --git a/text.txt b/text.txt
 diff --git a/binary.bin b/binary.bin
 Binary files a/binary.bin and b/binary.bin differ
 ";
-        let result = PatchSet::parse(content, ParseOptions::gitdiff().fail_on_binary());
+        let result: Result<Vec<_>, _> =
+            Patches::parse(content, ParseOptions::gitdiff().fail_on_binary()).collect();
 
         assert!(result.is_err());
     }
@@ -766,10 +815,12 @@ index 1234567..89abcdef 100644
 -old
 +new
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::gitdiff()).unwrap();
-        assert_eq!(patchset.len(), 1);
+        let patches: Vec<_> = Patches::parse(content, ParseOptions::gitdiff())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
         assert_eq!(
-            patchset.patches()[0].operation(),
+            patches[0].operation(),
             &FileOperation::Modify {
                 original: "a/file.rs".to_owned().into(),
                 modified: "b/file.rs".to_owned().into(),
@@ -799,9 +850,11 @@ diff --git a/file.rs b/file.rs
  real
 +change
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::gitdiff()).unwrap();
-        assert_eq!(patchset.len(), 1);
-        assert!(patchset.patches()[0].operation().is_modify());
+        let patches: Vec<_> = Patches::parse(content, ParseOptions::gitdiff())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
+        assert!(patches[0].operation().is_modify());
     }
 
     #[test]
@@ -828,10 +881,12 @@ diff --git a/real.rs b/real.rs
 ";
         // First `---` strips preamble, exposing fake `diff --git` as patch boundary.
         // fake has no `---`/`+++` headers, parsed as Modify with empty hunks.
-        let patchset = PatchSet::parse(content, ParseOptions::gitdiff()).unwrap();
-        assert_eq!(patchset.len(), 2);
-        assert!(patchset.patches()[0].patch().hunks().is_empty());
-        assert_eq!(patchset.patches()[1].patch().hunks().len(), 1);
+        let patches: Vec<_> = Patches::parse(content, ParseOptions::gitdiff())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 2);
+        assert!(patches[0].patch().hunks().is_empty());
+        assert_eq!(patches[1].patch().hunks().len(), 1);
     }
 
     #[test]
@@ -857,11 +912,13 @@ deleted file mode 100644
 @@ -1 +0,0 @@
 -deleted
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::gitdiff()).unwrap();
-        assert_eq!(patchset.len(), 3);
-        assert!(patchset.patches()[0].operation().is_modify());
-        assert!(patchset.patches()[1].operation().is_create());
-        assert!(patchset.patches()[2].operation().is_delete());
+        let patches: Vec<_> = Patches::parse(content, ParseOptions::gitdiff())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 3);
+        assert!(patches[0].operation().is_modify());
+        assert!(patches[1].operation().is_create());
+        assert!(patches[2].operation().is_delete());
     }
 
     #[test]
@@ -872,16 +929,82 @@ similarity index 100%
 rename from path with spaces/old file.txt
 rename to path with spaces/new file.txt
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::gitdiff()).unwrap();
-        assert_eq!(patchset.len(), 1);
+        let patches: Vec<_> = Patches::parse(content, ParseOptions::gitdiff())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
 
         assert_eq!(
-            patchset.patches()[0].operation(),
+            patches[0].operation(),
             &FileOperation::Rename {
                 from: "path with spaces/old file.txt".to_owned().into(),
                 to: "path with spaces/new file.txt".to_owned().into(),
             }
         );
+    }
+
+    /// Regression test: creating a .patch file whose content contains `diff --git` lines.
+    ///
+    /// The patch content appears as `+diff --git ...` (with `+` prefix).
+    /// When a subsequent real patch modifies the same path, its header
+    /// `diff --git a/same/path ...` must NOT be matched by substring search
+    /// inside the `+diff --git ...` line.
+    ///
+    /// This was found in rust-lang/rust commit 26cd5d86..34aab623 where a
+    /// `.patch` file was added containing embedded diff content.
+    #[test]
+    fn embedded_patch_file_with_diff_git_content() {
+        let content = "\
+diff --git a/patches/test.patch b/patches/test.patch
+new file mode 100644
+index 0000000..1234567
+--- /dev/null
++++ b/patches/test.patch
+@@ -0,0 +1,12 @@
++From abc123 Mon Sep 17 00:00:00 2001
++Subject: [PATCH] embedded patch
++
++---
++ library/std/src/lib.rs | 1 +
++
++diff --git a/library/std/src/lib.rs b/library/std/src/lib.rs
++index 1111111..2222222 100644
++--- a/library/std/src/lib.rs
+++++ b/library/std/src/lib.rs
++@@ -1 +1,2 @@
++ existing
+diff --git a/library/std/src/lib.rs b/library/std/src/lib.rs
+index 3333333..4444444 100644
+--- a/library/std/src/lib.rs
++++ b/library/std/src/lib.rs
+@@ -1 +1,2 @@
+ existing
++added
+";
+        let patches: Vec<_> = Patches::parse(content, ParseOptions::gitdiff())
+            .collect::<Result<_, _>>()
+            .unwrap();
+
+        // Should parse as two patches:
+        // 1. Creating patches/test.patch (12 lines added)
+        // 2. Modifying library/std/src/lib.rs (1 line added)
+        assert_eq!(patches.len(), 2);
+
+        assert_eq!(
+            patches[0].operation(),
+            &FileOperation::Create("b/patches/test.patch".to_owned().into())
+        );
+        assert_eq!(patches[0].patch().hunks().len(), 1);
+        assert_eq!(patches[0].patch().hunks()[0].new_range().len(), 12);
+
+        assert_eq!(
+            patches[1].operation(),
+            &FileOperation::Modify {
+                original: "a/library/std/src/lib.rs".to_owned().into(),
+                modified: "b/library/std/src/lib.rs".to_owned().into(),
+            }
+        );
+        assert_eq!(patches[1].patch().hunks().len(), 1);
     }
 }
 
@@ -899,9 +1022,11 @@ mod patchset_unidiff {
 +line3
  line4
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::unidiff()).unwrap();
-        assert_eq!(patchset.len(), 1);
-        assert!(patchset.patches()[0].operation().is_modify());
+        let patches = Patches::parse(content, ParseOptions::unidiff())
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
+        assert!(patches[0].operation().is_modify());
     }
 
     #[test]
@@ -918,10 +1043,12 @@ mod patchset_unidiff {
 -old2
 +new2
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::unidiff()).unwrap();
-        assert_eq!(patchset.len(), 2);
-        assert!(patchset.patches()[0].operation().is_modify());
-        assert!(patchset.patches()[1].operation().is_modify());
+        let patches: Vec<_> = Patches::parse(content, ParseOptions::unidiff())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 2);
+        assert!(patches[0].operation().is_modify());
+        assert!(patches[1].operation().is_modify());
     }
 
     #[test]
@@ -935,9 +1062,11 @@ It should be ignored
 -old
 +new
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::unidiff()).unwrap();
-        assert_eq!(patchset.len(), 1);
-        assert!(patchset.patches()[0].operation().is_modify());
+        let patches = Patches::parse(content, ParseOptions::unidiff())
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
+        assert!(patches[0].operation().is_modify());
     }
 
     #[test]
@@ -952,13 +1081,16 @@ It should be ignored
 +--- this line starts with dashes
  line3
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::unidiff()).unwrap();
-        assert_eq!(patchset.len(), 1);
+        let patches = Patches::parse(content, ParseOptions::unidiff())
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
     }
 
     #[test]
     fn empty_content() {
-        let err = PatchSet::parse("", ParseOptions::unidiff()).unwrap_err();
+        let err: Result<Vec<_>, _> = Patches::parse("", ParseOptions::unidiff()).collect();
+        let err = err.unwrap_err();
         assert_eq!(
             err.to_string(),
             "error parsing patchset: no valid patches found"
@@ -968,7 +1100,8 @@ It should be ignored
     #[test]
     fn not_a_patch() {
         let content = "Some random text\nNo patches here\n";
-        let err = PatchSet::parse(content, ParseOptions::unidiff()).unwrap_err();
+        let err: Result<Vec<_>, _> = Patches::parse(content, ParseOptions::unidiff()).collect();
+        let err = err.unwrap_err();
         assert_eq!(
             err.to_string(),
             "error parsing patchset: no valid patches found"
@@ -983,7 +1116,8 @@ It should be ignored
 Some random text
 No patches here
 ";
-        let err = PatchSet::parse(content, ParseOptions::unidiff()).unwrap_err();
+        let err: Result<Vec<_>, _> = Patches::parse(content, ParseOptions::unidiff()).collect();
+        let err = err.unwrap_err();
         assert_eq!(
             err.to_string(),
             "error parsing patchset: no valid patches found"
@@ -998,11 +1132,13 @@ No patches here
 @@ -0,0 +1 @@
 +content
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::unidiff()).unwrap();
-        assert_eq!(patchset.len(), 1);
-        assert!(patchset.patches()[0].operation().is_create());
+        let patches = Patches::parse(content, ParseOptions::unidiff())
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
+        assert!(patches[0].operation().is_create());
         assert_eq!(
-            patchset.patches()[0].operation(),
+            patches[0].operation(),
             &FileOperation::Create("b/new.rs".to_owned().into())
         );
     }
@@ -1015,11 +1151,13 @@ No patches here
 @@ -1 +0,0 @@
 -content
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::unidiff()).unwrap();
-        assert_eq!(patchset.len(), 1);
-        assert!(patchset.patches()[0].operation().is_delete());
+        let patches = Patches::parse(content, ParseOptions::unidiff())
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
+        assert!(patches[0].operation().is_delete());
         assert_eq!(
-            patchset.patches()[0].operation(),
+            patches[0].operation(),
             &FileOperation::Delete("a/old.rs".to_owned().into())
         );
     }
@@ -1033,10 +1171,12 @@ No patches here
 -old
 +new
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::unidiff()).unwrap();
-        assert_eq!(patchset.len(), 1);
+        let patches = Patches::parse(content, ParseOptions::unidiff())
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
         assert_eq!(
-            patchset.patches()[0].operation(),
+            patches[0].operation(),
             &FileOperation::Modify {
                 original: "a/old.rs".to_owned().into(),
                 modified: "b/new.rs".to_owned().into(),
@@ -1053,7 +1193,8 @@ No patches here
 -old
 +new
 ";
-        assert!(PatchSet::parse(content, ParseOptions::unidiff()).is_err());
+        let result: Result<Vec<_>, _> = Patches::parse(content, ParseOptions::unidiff()).collect();
+        assert!(result.is_err());
     }
 
     #[test]
@@ -1073,8 +1214,10 @@ diff --git a/file2.rs b/file2.rs
 -old2
 +new2
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::unidiff()).unwrap();
-        assert_eq!(patchset.len(), 2);
+        let patches = Patches::parse(content, ParseOptions::unidiff())
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 2);
     }
 
     #[test]
@@ -1105,10 +1248,12 @@ In a hole in the ground there lived a hobbit
 -- 
 2.40.0
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::unidiff()).unwrap();
-        assert_eq!(patchset.len(), 2);
-        assert!(patchset.patches()[0].operation().is_modify());
-        assert!(patchset.patches()[1].operation().is_modify());
+        let patches = Patches::parse(content, ParseOptions::unidiff())
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 2);
+        assert!(patches[0].operation().is_modify());
+        assert!(patches[1].operation().is_modify());
     }
 
     #[test]
@@ -1120,9 +1265,11 @@ In a hole in the ground there lived a hobbit
 -old
 +new
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::unidiff()).unwrap();
-        assert_eq!(patchset.len(), 1);
-        assert!(patchset.patches()[0].operation().is_modify());
+        let patches = Patches::parse(content, ParseOptions::unidiff())
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
+        assert!(patches[0].operation().is_modify());
     }
 
     #[test]
@@ -1134,9 +1281,11 @@ In a hole in the ground there lived a hobbit
 -old
 +new
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::unidiff()).unwrap();
-        assert_eq!(patchset.len(), 1);
-        assert!(patchset.patches()[0].operation().is_modify());
+        let patches = Patches::parse(content, ParseOptions::unidiff())
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
+        assert!(patches[0].operation().is_modify());
     }
 
     #[test]
@@ -1149,9 +1298,11 @@ In a hole in the ground there lived a hobbit
 -old
 +new
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::unidiff()).unwrap();
-        assert_eq!(patchset.len(), 1);
-        assert!(patchset.patches()[0].operation().is_modify());
+        let patches = Patches::parse(content, ParseOptions::unidiff())
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
+        assert!(patches[0].operation().is_modify());
     }
 
     #[test]
@@ -1172,8 +1323,10 @@ In a hole in the ground there lived a hobbit
 -old3
 +new3
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::unidiff()).unwrap();
-        assert_eq!(patchset.len(), 3);
+        let patches = Patches::parse(content, ParseOptions::unidiff())
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 3);
     }
 
     #[test]
@@ -1185,9 +1338,11 @@ In a hole in the ground there lived a hobbit
 -old
 +new
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::unidiff()).unwrap();
+        let patches = Patches::parse(content, ParseOptions::unidiff())
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
         assert_eq!(
-            patchset.patches()[0].operation(),
+            patches[0].operation(),
             &FileOperation::Modify {
                 original: "a/file.rs".to_owned().into(),
                 modified: "a/file.rs".to_owned().into(),
@@ -1204,9 +1359,11 @@ In a hole in the ground there lived a hobbit
 -old
 +new
 ";
-        let patchset = PatchSet::parse(content, ParseOptions::unidiff()).unwrap();
+        let patches = Patches::parse(content, ParseOptions::unidiff())
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
         assert_eq!(
-            patchset.patches()[0].operation(),
+            patches[0].operation(),
             &FileOperation::Modify {
                 original: "b/file.rs".to_owned().into(),
                 modified: "b/file.rs".to_owned().into(),
@@ -1224,7 +1381,8 @@ In a hole in the ground there lived a hobbit
 -old
 +new
 ";
-        let err = PatchSet::parse(content, ParseOptions::unidiff()).unwrap_err();
+        let err: Result<Vec<_>, _> = Patches::parse(content, ParseOptions::unidiff()).collect();
+        let err = err.unwrap_err();
         assert_eq!(
             err.to_string(),
             "error parsing patchset: no valid patches found"

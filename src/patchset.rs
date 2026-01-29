@@ -1,9 +1,10 @@
 //! Utilities for parsing unified diff patches containing multiple files.
 //!
-//! This module provides [`PatchSet`] for parsing patches that contain changes
+//! This module provides [`Patches`] for parsing patches that contain changes
 //! to multiple files, like the output of `git diff` or `git format-patch`.
 
 mod parse;
+pub use parse::Patches;
 #[cfg(test)]
 mod tests;
 
@@ -51,14 +52,16 @@ pub(crate) enum Binary {
 /// ## Example
 ///
 /// ```
-/// use diffy::patchset::ParseOptions;
-/// use diffy::patchset::PatchSet;
+/// use diffy::patchset::{ParseOptions, Patches};
 ///
 /// let input = "diff --git a/img.png b/img.png\nBinary files differ\n";
-/// let ps = PatchSet::parse(input, ParseOptions::gitdiff()).unwrap();
-/// assert!(ps.is_empty()); // binary was skipped
+/// let patches: Vec<_> = Patches::parse(input, ParseOptions::gitdiff())
+///     .collect::<Result<_, _>>()
+///     .unwrap();
+/// assert!(patches.is_empty()); // binary was skipped
 ///
-/// let result = PatchSet::parse(input, ParseOptions::gitdiff().fail_on_binary());
+/// let result: Result<Vec<_>, _> = Patches::parse(input, ParseOptions::gitdiff().fail_on_binary())
+///     .collect();
 /// assert!(result.is_err());
 /// ```
 #[derive(Debug, Clone)]
@@ -114,101 +117,6 @@ impl ParseOptions {
     pub fn fail_on_binary(mut self) -> Self {
         self.binary = Binary::Fail;
         self
-    }
-}
-
-/// A collection of patches for multiple files.
-///
-/// This is typically parsed from the output of `git diff` or `git format-patch`,
-/// which can contain changes to multiple files in a single patch.
-#[derive(Clone, PartialEq, Eq)]
-pub struct PatchSet<'a, T: ToOwned + ?Sized> {
-    patches: Vec<FilePatch<'a, T>>,
-}
-
-impl<T: ?Sized, O> std::fmt::Debug for PatchSet<'_, T>
-where
-    T: ToOwned<Owned = O> + std::fmt::Debug,
-    O: std::borrow::Borrow<T> + std::fmt::Debug,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("PatchSet")
-            .field("patches", &self.patches)
-            .finish()
-    }
-}
-
-impl<'a> PatchSet<'a, str> {
-    /// Parse a `PatchSet` from a string containing multiple file patches.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use diffy::patchset::{PatchSet, ParseOptions};
-    ///
-    /// let s = "\
-    /// --- a/file1.rs
-    /// +++ b/file1.rs
-    /// @@ -1 +1 @@
-    /// -old
-    /// +new
-    /// --- a/file2.rs
-    /// +++ b/file2.rs
-    /// @@ -1 +1 @@
-    /// -foo
-    /// +bar
-    /// ";
-    ///
-    /// // Parse as standard unified diff
-    /// let patchset = PatchSet::parse(s, ParseOptions::unidiff()).unwrap();
-    /// assert_eq!(patchset.patches().len(), 2);
-    /// ```
-    pub fn parse(s: &'a str, opts: ParseOptions) -> Result<PatchSet<'a, str>, PatchSetParseError> {
-        parse::parse(s, opts)
-    }
-}
-
-impl<'a, T: ToOwned + ?Sized> PatchSet<'a, T> {
-    fn new(patches: Vec<FilePatch<'a, T>>) -> Self {
-        Self { patches }
-    }
-
-    /// Returns the file patches in this patch set.
-    pub fn patches(&self) -> &[FilePatch<'a, T>] {
-        &self.patches
-    }
-
-    /// Returns an iterator over the file patches.
-    pub fn iter(&self) -> impl Iterator<Item = &FilePatch<'a, T>> {
-        self.patches.iter()
-    }
-
-    /// Returns the number of file patches.
-    pub fn len(&self) -> usize {
-        self.patches.len()
-    }
-
-    /// Returns `true` if there are no file patches.
-    pub fn is_empty(&self) -> bool {
-        self.patches.is_empty()
-    }
-}
-
-impl<'a, T: ToOwned + ?Sized> IntoIterator for PatchSet<'a, T> {
-    type Item = FilePatch<'a, T>;
-    type IntoIter = std::vec::IntoIter<Self::Item>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.patches.into_iter()
-    }
-}
-
-impl<'a, 'b, T: ToOwned + ?Sized> IntoIterator for &'b PatchSet<'a, T> {
-    type Item = &'b FilePatch<'a, T>;
-    type IntoIter = std::slice::Iter<'b, FilePatch<'a, T>>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.patches.iter()
     }
 }
 
@@ -417,7 +325,7 @@ impl FileOperation<'_> {
     }
 }
 
-/// An error returned when parsing a [`PatchSet`] fails.
+/// An error returned when parsing patches fails.
 #[derive(Debug)]
 pub struct PatchSetParseError(Cow<'static, str>);
 
