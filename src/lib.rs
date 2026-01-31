@@ -226,7 +226,7 @@ mod apply;
 mod diff;
 mod merge;
 mod patch;
-pub mod patchset;
+pub mod patches;
 mod range;
 mod utils;
 

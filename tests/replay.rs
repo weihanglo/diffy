@@ -55,9 +55,9 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Mutex;
 
-use diffy::patchset::FileOperation;
-use diffy::patchset::ParseOptions;
-use diffy::patchset::PatchSet;
+use diffy::patches::FileOperation;
+use diffy::patches::ParseOptions;
+use diffy::patches::Patches;
 use rayon::prelude::*;
 
 /// Local enum for test configuration (maps to ParseOptions).
@@ -315,7 +315,7 @@ fn process_commit(repo: &PathBuf, parent: &str, child: &str, mode: TestMode) -> 
         };
     }
 
-    let patchset = match PatchSet::parse(&diff_output, mode.into()) {
+    let patchset: Vec<_> = match Patches::parse(&diff_output, mode.into()).collect() {
         Ok(ps) => ps,
         Err(e) => {
             panic!(

@@ -8,10 +8,10 @@ use std::process::Command;
 use std::process::Stdio;
 use std::sync::Once;
 
-use diffy::patchset::FileOperation;
-use diffy::patchset::ParseOptions;
-use diffy::patchset::PatchSet;
-use diffy::patchset::PatchSetParseError;
+use diffy::patches::FileOperation;
+use diffy::patches::ParseOptions;
+use diffy::patches::PatchSetParseError;
+use diffy::patches::Patches;
 
 /// Which external tool to compare against.
 #[derive(Clone, Copy)]
@@ -334,9 +334,11 @@ pub fn apply_diffy(
     opts: ParseOptions,
     strip_prefix: u32,
 ) -> Result<(), TestError> {
-    let patchset = PatchSet::parse(patch, opts).map_err(TestError::Parse)?;
+    let patches: Vec<_> = Patches::parse(patch, opts)
+        .collect::<Result<_, _>>()
+        .map_err(TestError::Parse)?;
 
-    for file_patch in patchset.iter() {
+    for file_patch in patches.iter() {
         let operation = file_patch.operation().strip_prefix(strip_prefix as usize);
 
         let (original_name, target_name) = match &operation {

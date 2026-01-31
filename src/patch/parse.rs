@@ -37,12 +37,14 @@ impl std::error::Error for ParsePatchError {}
 
 struct Parser<'a, T: Text + ?Sized> {
     lines: std::iter::Peekable<LineIter<'a, T>>,
+    offset: usize,
 }
 
 impl<'a, T: Text + ?Sized> Parser<'a, T> {
     fn new(input: &'a T) -> Self {
         Self {
             lines: LineIter::new(input).peekable(),
+            offset: 0,
         }
     }
 
@@ -55,20 +57,32 @@ impl<'a, T: Text + ?Sized> Parser<'a, T> {
             .lines
             .next()
             .ok_or_else(|| ParsePatchError::new("unexpected EOF"))?;
+        self.offset += line.len();
         Ok(line)
+    }
+
+    /// Returns the number of bytes consumed so far.
+    fn consumed(&self) -> usize {
+        self.offset
     }
 }
 
 pub fn parse(input: &str) -> Result<Patch<'_, str>> {
+    parse_one(input).map(|(patch, _)| patch)
+}
+
+/// Parses one patch from input and returns bytes consumed.
+pub(crate) fn parse_one(input: &str) -> Result<(Patch<'_, str>, usize)> {
     let mut parser = Parser::new(input);
     let header = patch_header(&mut parser)?;
     let hunks = hunks(&mut parser)?;
 
-    Ok(Patch::new(
+    let patch = Patch::new(
         header.0.map(convert_cow_to_str),
         header.1.map(convert_cow_to_str),
         hunks,
-    ))
+    );
+    Ok((patch, parser.consumed()))
 }
 
 pub fn parse_bytes(input: &[u8]) -> Result<Patch<'_, [u8]>> {

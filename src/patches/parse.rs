@@ -8,8 +8,8 @@ use super::FileOperation;
 use super::FilePatch;
 use super::Format;
 use super::ParseOptions;
-use super::PatchSet;
 use super::PatchSetParseError;
+use crate::patch::parse::parse_one;
 use crate::utils::escaped_filename;
 use crate::Patch;
 
@@ -25,157 +25,275 @@ const DEV_NULL: &str = "/dev/null";
 /// Separator between commit message and patch in git format-patch output.
 const EMAIL_PREAMBLE_SEPARATOR: &str = "\n---\n";
 
-/// Parse a multi-file patch.
-pub fn parse(input: &str, opts: ParseOptions) -> Result<PatchSet<'_, str>, PatchSetParseError> {
-    match opts.format {
-        Format::GitDiff => parse_gitdiff(input, &opts),
-        Format::UniDiff => parse_unidiff(input),
-    }
+/// Streaming iterator for parsing patches one at a time.
+///
+/// Created by [`Patches::parse`].
+///
+/// # Example
+///
+/// ```
+/// use diffy::patches::{Patches, ParseOptions};
+///
+/// let s = "\
+/// diff --git a/file1.rs b/file1.rs
+/// --- a/file1.rs
+/// +++ b/file1.rs
+/// @@ -1 +1 @@
+/// -old
+/// +new
+/// diff --git a/file2.rs b/file2.rs
+/// --- a/file2.rs
+/// +++ b/file2.rs
+/// @@ -1 +1 @@
+/// -foo
+/// +bar
+/// ";
+///
+/// for patch in Patches::parse(s, ParseOptions::gitdiff()) {
+///     let patch = patch.unwrap();
+///     println!("{:?}", patch.operation());
+/// }
+/// ```
+pub struct Patches<'a> {
+    input: &'a str,
+    offset: usize,
+    opts: ParseOptions,
+    finished: bool,
+    found_any: bool,
 }
 
-fn parse_gitdiff<'a>(
-    input: &'a str,
-    opts: &ParseOptions,
-) -> Result<PatchSet<'a, str>, PatchSetParseError> {
-    // Strip email preamble to avoid false `diff --git` matches in commit messages.
-    let input = strip_email_preamble(input);
+impl<'a> Patches<'a> {
+    /// Creates a streaming parser for multiple file patches.
+    pub fn parse(input: &'a str, opts: ParseOptions) -> Self {
+        // Strip email preamble once at construction
+        let input = strip_email_preamble(input);
+        Self {
+            input,
+            offset: 0,
+            opts,
+            finished: false,
+            found_any: false,
+        }
+    }
 
-    let mut patches = Vec::new();
-    let mut found_any = false;
+    /// Finds the next `diff --git` boundary and returns its offset.
+    fn find_next_gitdiff_start(&self) -> Option<usize> {
+        let remaining = &self.input[self.offset..];
+        let mut byte_offset = 0;
 
-    for raw in split_patches_gitdiff(input) {
-        found_any = true;
-        let header = GitHeader::parse(raw.header);
+        for line in remaining.lines() {
+            if is_gitdiff_boundary(line) {
+                return Some(self.offset + byte_offset);
+            }
+            byte_offset += line.len();
+            byte_offset += line_ending_len(&remaining[byte_offset..]);
+        }
+        None
+    }
 
-        // Handle binary diffs based on options
+    /// Finds the end of the current patch (next `diff --git` or EOF).
+    fn find_patch_end(&self, start: usize) -> usize {
+        let after_first_line = self.input[start..]
+            .find('\n')
+            .map(|i| start + i + 1)
+            .unwrap_or(self.input.len());
+
+        let remaining = &self.input[after_first_line..];
+        let mut byte_offset = 0;
+
+        for line in remaining.lines() {
+            if is_gitdiff_boundary(line) {
+                return after_first_line + byte_offset;
+            }
+            byte_offset += line.len();
+            byte_offset += line_ending_len(&remaining[byte_offset..]);
+        }
+        self.input.len()
+    }
+
+    /// Finds the header end (`---` line) within a patch range.
+    fn find_header_end(&self, start: usize, end: usize) -> Option<usize> {
+        let patch_content = &self.input[start..end];
+        let mut byte_offset = 0;
+
+        for line in patch_content.lines() {
+            if line.starts_with(ORIGINAL_PREFIX) {
+                return Some(start + byte_offset);
+            }
+            byte_offset += line.len();
+            byte_offset += line_ending_len(&patch_content[byte_offset..]);
+        }
+        None
+    }
+
+    fn next_gitdiff_patch(&mut self) -> Option<Result<FilePatch<'a, str>, PatchSetParseError>> {
+        // Find next patch start
+        let patch_start = self.find_next_gitdiff_start()?;
+
+        // Skip any junk before first patch
+        self.offset = patch_start;
+        self.found_any = true;
+
+        // Find patch end (next `diff --git` or EOF)
+        let patch_end = self.find_patch_end(patch_start);
+
+        // Find header end (`---` line)
+        let header_end = self.find_header_end(patch_start, patch_end);
+
+        // Create GitDiff for header parsing
+        let git_diff = GitDiff::new(self.input, patch_start, patch_end, header_end);
+        let header = GitHeader::parse(git_diff.header);
+
+        // Handle binary diffs
         if header.is_binary {
-            match opts.binary {
-                Binary::Skip => continue,
+            self.offset = patch_end;
+            match self.opts.binary {
+                Binary::Skip => {
+                    // Recurse to get next non-binary patch
+                    return self.next_gitdiff_patch();
+                }
                 Binary::Fail => {
                     let path = header.diff_git_line.unwrap_or("<unknown>");
-                    return Err(PatchSetParseError::new(format!(
+                    return Some(Err(PatchSetParseError::new(format!(
                         "binary diff not supported: {path}"
-                    )));
+                    ))));
                 }
             }
         }
 
-        let patch =
-            Patch::from_str(raw.patch).map_err(|e| PatchSetParseError::new(e.to_string()))?;
-        let operation = extract_file_op_gitdiff(&header, &patch)?;
-        let old_mode = header
+        // Parse the unified diff portion
+        let patch = if git_diff.patch.is_empty() {
+            // Pure rename/mode-change: create empty patch
+            Patch::from_str("").unwrap()
+        } else {
+            match parse_one(git_diff.patch) {
+                Ok((patch, _consumed)) => patch,
+                Err(e) => return Some(Err(PatchSetParseError::new(e.to_string()))),
+            }
+        };
+
+        // Extract file operation
+        let operation = match extract_file_op_gitdiff(&header, &patch) {
+            Ok(op) => op,
+            Err(e) => return Some(Err(e)),
+        };
+
+        // Parse file modes
+        let old_mode = match header
             .old_mode
             .or(header.deleted_file_mode)
             .map(str::parse::<FileMode>)
-            .transpose()?;
-        let new_mode = header
+            .transpose()
+        {
+            Ok(m) => m,
+            Err(e) => return Some(Err(e)),
+        };
+        let new_mode = match header
             .new_mode
             .or(header.new_file_mode)
             .map(str::parse::<FileMode>)
-            .transpose()?;
-        patches.push(FilePatch::new(operation, patch, old_mode, new_mode));
+            .transpose()
+        {
+            Ok(m) => m,
+            Err(e) => return Some(Err(e)),
+        };
+
+        // Advance offset past this patch
+        self.offset = patch_end;
+
+        Some(Ok(FilePatch::new(operation, patch, old_mode, new_mode)))
     }
 
-    // Only error if input had no patches at all.
-    // Empty result is OK if all patches were binary and skipped.
-    if !found_any {
-        return Err(PatchSetParseError::new("no valid patches found"));
-    }
+    fn next_unidiff_patch(&mut self) -> Option<Result<FilePatch<'a, str>, PatchSetParseError>> {
+        let remaining = &self.input[self.offset..];
+        if remaining.is_empty() {
+            return None;
+        }
 
-    Ok(PatchSet::new(patches))
-}
+        // Find next patch boundary using prev/current/next line lookahead
+        let mut patch_start = None::<usize>;
+        let mut patch_end = None::<usize>;
+        let mut prev_line = None::<&str>;
+        let mut byte_offset = 0;
 
-fn parse_unidiff(input: &str) -> Result<PatchSet<'_, str>, PatchSetParseError> {
-    let patch_strs = split_patches_unidiff(input);
+        let mut lines = remaining.lines().peekable();
 
-    let mut patches = Vec::with_capacity(patch_strs.len());
-    for patch_str in patch_strs {
-        let patch =
-            Patch::from_str(patch_str).map_err(|e| PatchSetParseError::new(e.to_string()))?;
-        let operation = extract_file_op_unidiff(patch.original_path(), patch.modified_path())?;
-        patches.push(FilePatch::new(operation, patch, None, None));
-    }
+        while let Some(line) = lines.next() {
+            let next_line = lines.peek().copied();
 
-    if patches.is_empty() {
-        return Err(PatchSetParseError::new("no valid patches found"));
-    }
-
-    Ok(PatchSet::new(patches))
-}
-
-/// Splits a git diff containing multiple file patches (GitDiff mode).
-///
-/// Content should be email preamble stripped.
-fn split_patches_gitdiff(content: &str) -> Vec<GitDiff<'_>> {
-    let mut patches = Vec::new();
-    let mut patch_start = None::<usize>;
-    let mut header_end = None::<usize>; // byte offset where `---` was found
-    let mut byte_offset = 0;
-
-    for line in content.lines() {
-        if is_gitdiff_boundary(line) {
-            if let Some(start) = patch_start {
-                patches.push(GitDiff::new(content, start, byte_offset, header_end));
+            if is_unidiff_boundary(prev_line, line, next_line) {
+                if patch_start.is_some() {
+                    // Found the start of the next patch
+                    patch_end = Some(byte_offset);
+                    break;
+                }
+                // Found start of first patch
+                patch_start = Some(byte_offset);
+                self.found_any = true;
             }
-            patch_start = Some(byte_offset);
-            header_end = None;
-        } else if line.starts_with(ORIGINAL_PREFIX) && header_end.is_none() {
-            // First `---` after `diff --git` marks end of extended header
-            // Assumption: `git format-patch` always has `---` when starting patch
-            // TODO: add compat tests check whether git may produce other prefix.
-            header_end = Some(byte_offset);
+
+            prev_line = Some(line);
+            byte_offset += line.len();
+            byte_offset += line_ending_len(&remaining[byte_offset..]);
         }
 
-        byte_offset += line.len();
+        // No patch found
+        let patch_start = patch_start?;
 
-        if content[byte_offset..].starts_with("\r\n") {
-            byte_offset += 2;
-        } else if content[byte_offset..].starts_with('\n') {
-            byte_offset += 1;
-        }
+        // If no end found, patch extends to EOF
+        let patch_end = patch_end.unwrap_or(remaining.len());
+
+        let patch_content = &remaining[patch_start..patch_end];
+
+        let patch = match parse_one(patch_content) {
+            Ok((patch, _consumed)) => patch,
+            Err(e) => return Some(Err(PatchSetParseError::new(e.to_string()))),
+        };
+
+        let operation = match extract_file_op_unidiff(patch.original_path(), patch.modified_path())
+        {
+            Ok(op) => op,
+            Err(e) => return Some(Err(e)),
+        };
+
+        // Advance offset past this patch
+        self.offset += patch_end;
+
+        Some(Ok(FilePatch::new(operation, patch, None, None)))
     }
-
-    if let Some(start) = patch_start {
-        patches.push(GitDiff::new(content, start, content.len(), header_end));
-    }
-
-    patches
 }
 
-/// Splits a unified diff containing multiple file patches (UniDiff mode).
-fn split_patches_unidiff(content: &str) -> Vec<&str> {
-    let mut patches = Vec::new();
-    let mut patch_start = None::<usize>;
-    let mut prev_line = None::<&str>;
-    let mut byte_offset = 0;
+impl<'a> Iterator for Patches<'a> {
+    type Item = Result<FilePatch<'a, str>, PatchSetParseError>;
 
-    let mut lines = content.lines().peekable();
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.finished {
+            return None;
+        }
 
-    while let Some(line) = lines.next() {
-        let next_line = lines.peek().copied();
-
-        if is_unidiff_boundary(prev_line, line, next_line) {
-            if let Some(start) = patch_start {
-                patches.push(&content[start..byte_offset]);
+        match self.opts.format {
+            Format::GitDiff => {
+                let result = self.next_gitdiff_patch();
+                if result.is_none() {
+                    self.finished = true;
+                    if !self.found_any {
+                        return Some(Err(PatchSetParseError::new("no valid patches found")));
+                    }
+                }
+                result
             }
-            patch_start = Some(byte_offset);
-        }
-
-        prev_line = Some(line);
-        byte_offset += line.len();
-
-        if content[byte_offset..].starts_with("\r\n") {
-            byte_offset += 2;
-        } else if content[byte_offset..].starts_with('\n') {
-            byte_offset += 1;
+            Format::UniDiff => {
+                let result = self.next_unidiff_patch();
+                if result.is_none() {
+                    self.finished = true;
+                    if !self.found_any {
+                        return Some(Err(PatchSetParseError::new("no valid patches found")));
+                    }
+                }
+                result
+            }
         }
     }
-
-    if let Some(start) = patch_start {
-        patches.push(&content[start..]);
-    }
-
-    patches
 }
 
 /// Checks if the current line is a patch boundary in GitDiff mode.
@@ -640,5 +758,16 @@ impl<'a> GitHeader<'a> {
         }
 
         header
+    }
+}
+
+/// Returns the length of the line ending at the start of `s` (0, 1, or 2).
+fn line_ending_len(s: &str) -> usize {
+    if s.starts_with("\r\n") {
+        2
+    } else if s.starts_with('\n') {
+        1
+    } else {
+        0
     }
 }
