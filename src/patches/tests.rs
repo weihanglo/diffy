@@ -63,7 +63,7 @@ diff --git a/file2.rs b/file2.rs
                 modified: "b/file1.rs".to_owned().into(),
             }
         );
-        assert_eq!(patches[0].patch().hunks().len(), 1);
+        assert_eq!(patches[0].patch().as_text().unwrap().hunks().len(), 1);
 
         assert_eq!(
             patches[1].operation(),
@@ -72,7 +72,7 @@ diff --git a/file2.rs b/file2.rs
                 modified: "b/file2.rs".to_owned().into(),
             }
         );
-        assert_eq!(patches[1].patch().hunks().len(), 1);
+        assert_eq!(patches[1].patch().as_text().unwrap().hunks().len(), 1);
     }
 
     #[test]
@@ -99,7 +99,7 @@ new mode 100755
                 modified: "b/file.rs".to_owned().into(),
             }
         );
-        assert_eq!(patches[0].patch().hunks().len(), 1);
+        assert_eq!(patches[0].patch().as_text().unwrap().hunks().len(), 1);
         assert_eq!(patches[0].old_mode(), Some(&FileMode::Regular));
         assert_eq!(patches[0].new_mode(), Some(&FileMode::Executable));
     }
@@ -123,7 +123,7 @@ new file mode 100755
             patches[0].operation(),
             &FileOperation::Create("b/new.sh".to_owned().into())
         );
-        assert_eq!(patches[0].patch().hunks().len(), 1);
+        assert_eq!(patches[0].patch().as_text().unwrap().hunks().len(), 1);
         assert_eq!(patches[0].old_mode(), None);
         assert_eq!(patches[0].new_mode(), Some(&FileMode::Executable));
     }
@@ -147,7 +147,7 @@ deleted file mode 100755
             patches[0].operation(),
             &FileOperation::Delete("a/old.sh".to_owned().into())
         );
-        assert_eq!(patches[0].patch().hunks().len(), 1);
+        assert_eq!(patches[0].patch().as_text().unwrap().hunks().len(), 1);
         assert_eq!(patches[0].old_mode(), Some(&FileMode::Executable));
         assert_eq!(patches[0].new_mode(), None);
     }
@@ -168,7 +168,7 @@ index 0000000..e69de29
             patches[0].operation(),
             &FileOperation::Create("b/empty.txt".to_owned().into())
         );
-        assert!(patches[0].patch().hunks().is_empty());
+        assert!(patches[0].patch().as_text().unwrap().hunks().is_empty());
         assert_eq!(patches[0].old_mode(), None);
         assert_eq!(patches[0].new_mode(), Some(&FileMode::Regular));
     }
@@ -189,7 +189,7 @@ index e69de29..0000000
             patches[0].operation(),
             &FileOperation::Delete("a/empty.txt".to_owned().into())
         );
-        assert!(patches[0].patch().hunks().is_empty());
+        assert!(patches[0].patch().as_text().unwrap().hunks().is_empty());
         assert_eq!(patches[0].old_mode(), Some(&FileMode::Regular));
         assert_eq!(patches[0].new_mode(), None);
     }
@@ -215,7 +215,7 @@ rename to new.txt
             }
         );
         // Pure rename has no hunks
-        assert!(patches[0].patch().hunks().is_empty());
+        assert!(patches[0].patch().as_text().unwrap().hunks().is_empty());
     }
 
     #[test]
@@ -239,7 +239,7 @@ copy to copy.txt
             }
         );
         // Pure copy has no hunks
-        assert!(patches[0].patch().hunks().is_empty());
+        assert!(patches[0].patch().as_text().unwrap().hunks().is_empty());
     }
 
     #[test]
@@ -268,7 +268,7 @@ rename to new.txt
             }
         );
         // Rename with changes has hunks
-        assert_eq!(patches[0].patch().hunks().len(), 1);
+        assert_eq!(patches[0].patch().as_text().unwrap().hunks().len(), 1);
     }
 
     #[test]
@@ -298,7 +298,7 @@ copy to copy.txt
             }
         );
         // Copy with changes has hunks
-        assert_eq!(patches[0].patch().hunks().len(), 1);
+        assert_eq!(patches[0].patch().as_text().unwrap().hunks().len(), 1);
     }
 
     #[test]
@@ -325,7 +325,7 @@ rename to renamed.sh
                 to: "renamed.sh".to_owned().into(),
             }
         );
-        assert!(patches[0].patch().hunks().is_empty());
+        assert!(patches[0].patch().as_text().unwrap().hunks().is_empty());
 
         assert_eq!(patches[0].old_mode(), Some(&FileMode::Regular));
         assert_eq!(patches[0].new_mode(), Some(&FileMode::Executable));
@@ -384,7 +384,7 @@ new mode 100755
                 modified: "b/script.sh".to_owned().into(),
             }
         );
-        assert!(patches[0].patch().hunks().is_empty());
+        assert!(patches[0].patch().as_text().unwrap().hunks().is_empty());
 
         assert_eq!(patches[0].old_mode(), Some(&FileMode::Regular));
         assert_eq!(patches[0].new_mode(), Some(&FileMode::Executable));
@@ -716,7 +716,7 @@ index c182a93..a39caff 100644
 
         // Only text patch remains, binary is skipped
         assert_eq!(patches.len(), 1);
-        assert_eq!(patches[0].patch().hunks().len(), 1);
+        assert_eq!(patches[0].patch().as_text().unwrap().hunks().len(), 1);
         assert_eq!(
             patches[0].operation(),
             &FileOperation::Modify {
@@ -745,7 +745,7 @@ Binary files a/binary.bin and b/binary.bin differ
 
         // Only text patch remains, binary is skipped
         assert_eq!(patches.len(), 1);
-        assert_eq!(patches[0].patch().hunks().len(), 1);
+        assert_eq!(patches[0].patch().as_text().unwrap().hunks().len(), 1);
     }
 
     #[test]
@@ -885,8 +885,8 @@ diff --git a/real.rs b/real.rs
             .collect::<Result<_, _>>()
             .unwrap();
         assert_eq!(patches.len(), 2);
-        assert!(patches[0].patch().hunks().is_empty());
-        assert_eq!(patches[1].patch().hunks().len(), 1);
+        assert!(patches[0].patch().as_text().unwrap().hunks().is_empty());
+        assert_eq!(patches[1].patch().as_text().unwrap().hunks().len(), 1);
     }
 
     #[test]
@@ -994,8 +994,13 @@ index 3333333..4444444 100644
             patches[0].operation(),
             &FileOperation::Create("b/patches/test.patch".to_owned().into())
         );
-        assert_eq!(patches[0].patch().hunks().len(), 1);
-        assert_eq!(patches[0].patch().hunks()[0].new_range().len(), 12);
+        assert_eq!(patches[0].patch().as_text().unwrap().hunks().len(), 1);
+        assert_eq!(
+            patches[0].patch().as_text().unwrap().hunks()[0]
+                .new_range()
+                .len(),
+            12
+        );
 
         assert_eq!(
             patches[1].operation(),
@@ -1004,7 +1009,7 @@ index 3333333..4444444 100644
                 modified: "b/library/std/src/lib.rs".to_owned().into(),
             }
         );
-        assert_eq!(patches[1].patch().hunks().len(), 1);
+        assert_eq!(patches[1].patch().as_text().unwrap().hunks().len(), 1);
     }
 }
 

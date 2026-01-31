@@ -10,6 +10,7 @@ use std::sync::Once;
 
 use diffy::patches::FileOperation;
 use diffy::patches::ParseOptions;
+use diffy::patches::PatchKind;
 use diffy::patches::PatchSetParseError;
 use diffy::patches::Patches;
 
@@ -352,20 +353,28 @@ pub fn apply_diffy(
             }
         };
 
-        let original = if let Some(name) = original_name {
-            let original_path = in_dir.join(name);
-            fs::read_to_string(&original_path).unwrap_or_default()
-        } else {
-            String::new()
-        };
-
-        let result = diffy::apply(&original, file_patch.patch()).map_err(TestError::Apply)?;
-
         let result_path = output_dir.join(target_name);
-        if let Some(parent) = result_path.parent() {
-            fs::create_dir_all(parent).unwrap();
+
+        match file_patch.patch() {
+            PatchKind::Text(patch) => {
+                let original = if let Some(name) = original_name {
+                    let original_path = in_dir.join(name);
+                    fs::read_to_string(&original_path).unwrap_or_default()
+                } else {
+                    String::new()
+                };
+
+                let result = diffy::apply(&original, patch).map_err(TestError::Apply)?;
+
+                if let Some(parent) = result_path.parent() {
+                    fs::create_dir_all(parent).unwrap();
+                }
+                fs::write(&result_path, &result).unwrap();
+            }
+            PatchKind::Binary(_) => {
+                panic!("binary patch application not supported");
+            }
         }
-        fs::write(&result_path, &result).unwrap();
     }
 
     Ok(())

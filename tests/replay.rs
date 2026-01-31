@@ -404,7 +404,7 @@ fn process_commit(repo: &PathBuf, parent: &str, child: &str, mode: TestMode) -> 
             }
         };
 
-        let patch = file_patch.patch();
+        let patch = file_patch.patch().as_text().unwrap();
         let result = match diffy::apply(&base_content, patch) {
             Ok(r) => r,
             Err(e) => {
