@@ -7,6 +7,9 @@
 
 #[cfg(feature = "binary")]
 mod base85;
+#[cfg(feature = "binary")]
+mod delta;
+
 use std::borrow::Cow;
 use std::fmt;
 
