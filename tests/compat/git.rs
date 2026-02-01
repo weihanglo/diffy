@@ -97,18 +97,10 @@ fn junk_between_files() {
     Case::git("junk_between_files").strip(1).run();
 }
 
-// Mixed binary and text patch - git applies text only, diffy applies both.
+// Mixed binary and text patch.
 //
-// - git apply: skips binary, applies text change
-// - diffy: parses both, applies text correctly but also writes empty binary
-//
-// expect_compat(false): diffy outputs extra empty image.png, git does not
-//
-// The text portion should be applied correctly by both tools.
+// Both should skip text binary marker.
 #[test]
 fn binary_and_text_mixed() {
-    Case::git("binary_and_text_mixed")
-        .strip(1)
-        .expect_compat(false)
-        .run();
+    Case::git("binary_and_text_mixed").strip(1).run();
 }

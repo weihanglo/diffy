@@ -33,6 +33,8 @@ mod file_operation {
 }
 
 mod patchset_gitdiff {
+    use crate::binary::BinaryPatch;
+
     use super::*;
 
     #[test]
@@ -634,8 +636,18 @@ Binary files a/image.png and b/image.png differ
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
 
-        // Binary diffs are skipped by default
-        assert!(patches.is_empty());
+        assert_eq!(patches.len(), 1);
+        assert!(matches!(
+            patches[0].patch().as_binary().unwrap(),
+            BinaryPatch::NoData
+        ));
+        assert_eq!(
+            patches[0].operation(),
+            &FileOperation::Modify {
+                original: "a/image.png".to_owned().into(),
+                modified: "b/image.png".to_owned().into(),
+            }
+        );
     }
 
     #[test]
@@ -651,8 +663,15 @@ Binary files /dev/null and b/binary.bin differ
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
 
-        // Binary diffs are skipped by default
-        assert!(patches.is_empty());
+        assert_eq!(patches.len(), 1);
+        assert!(matches!(
+            patches[0].patch().as_binary().unwrap(),
+            BinaryPatch::NoData
+        ));
+        assert_eq!(
+            patches[0].operation(),
+            &FileOperation::Create("b/binary.bin".to_owned().into()),
+        );
     }
 
     #[test]
@@ -668,8 +687,15 @@ Binary files a/binary.bin and /dev/null differ
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
 
-        // Binary diffs are skipped by default
-        assert!(patches.is_empty());
+        assert_eq!(patches.len(), 1);
+        assert!(matches!(
+            patches[0].patch().as_binary().unwrap(),
+            BinaryPatch::NoData
+        ));
+        assert_eq!(
+            patches[0].operation(),
+            &FileOperation::Delete("a/binary.bin".to_owned().into()),
+        );
     }
 
     #[test]
@@ -691,8 +717,15 @@ KcmV+b0RR6000031
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
 
-        // GIT binary patch format is also skipped
-        assert!(patches.is_empty());
+        assert_eq!(patches.len(), 1);
+        assert!(matches!(
+            patches[0].patch().as_binary().unwrap(),
+            BinaryPatch::Literal { .. }
+        ));
+        assert_eq!(
+            patches[0].operation(),
+            &FileOperation::Create("b/binary.bin".to_owned().into()),
+        );
     }
 
     #[test]
@@ -714,11 +747,14 @@ index c182a93..a39caff 100644
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
 
-        // Only text patch remains, binary is skipped
-        assert_eq!(patches.len(), 1);
-        assert_eq!(patches[0].patch().as_text().unwrap().hunks().len(), 1);
+        assert_eq!(patches.len(), 2);
+        assert!(matches!(
+            patches[0].patch().as_binary().unwrap(),
+            BinaryPatch::NoData
+        ));
+        assert_eq!(patches[1].patch().as_text().unwrap().hunks().len(), 1);
         assert_eq!(
-            patches[0].operation(),
+            patches[1].operation(),
             &FileOperation::Modify {
                 original: "a/text.txt".to_owned().into(),
                 modified: "b/text.txt".to_owned().into(),
@@ -743,9 +779,12 @@ Binary files a/binary.bin and b/binary.bin differ
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
 
-        // Only text patch remains, binary is skipped
-        assert_eq!(patches.len(), 1);
+        assert_eq!(patches.len(), 2);
         assert_eq!(patches[0].patch().as_text().unwrap().hunks().len(), 1);
+        assert!(matches!(
+            patches[1].patch().as_binary(),
+            Some(BinaryPatch::NoData)
+        ));
     }
 
     #[test]
@@ -765,8 +804,15 @@ Binary files /dev/null and b/b.png differ
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
 
-        // All binary, so result is empty
-        assert!(patches.is_empty());
+        assert_eq!(patches.len(), 2);
+        assert!(matches!(
+            patches[0].patch().as_binary(),
+            Some(BinaryPatch::NoData)
+        ));
+        assert!(matches!(
+            patches[1].patch().as_binary(),
+            Some(BinaryPatch::NoData)
+        ));
     }
 
     #[test]

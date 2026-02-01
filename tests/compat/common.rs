@@ -8,6 +8,7 @@ use std::process::Command;
 use std::process::Stdio;
 use std::sync::Once;
 
+use diffy::binary::BinaryPatch;
 use diffy::patches::FileOperation;
 use diffy::patches::ParseOptions;
 use diffy::patches::PatchKind;
@@ -370,6 +371,9 @@ pub fn apply_diffy(
                     fs::create_dir_all(parent).unwrap();
                 }
                 fs::write(&result_path, &result).unwrap();
+            }
+            PatchKind::Binary(BinaryPatch::NoData) => {
+                // Dont do anything if it is just a binary patch marker.
             }
             PatchKind::Binary(_) => {
                 panic!("binary patch application not supported");

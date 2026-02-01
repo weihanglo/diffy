@@ -27,11 +27,11 @@ pub(crate) enum Format {
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) enum Binary {
     /// Skip binary diffs silently.
-    #[default]
     Skip,
     /// Return error if binary diff encountered.
     Fail,
     /// Keep binary diffs in output.
+    #[default]
     Keep,
 }
 
@@ -50,19 +50,30 @@ pub(crate) enum Binary {
 /// Note that this is not a documented Git behavior,
 /// so the implementation here is subject to change ifn Git changes
 ///
-/// By default, binary diffs are skipped.
+/// By default, binary diffs are kept (parsed but may not be applicable).
 ///
 /// ## Example
 ///
 /// ```
-/// use diffy::patches::{ParseOptions, Patches};
+/// use diffy::patches::{ParseOptions, Patches, PatchKind};
+/// use diffy::binary::BinaryPatch;
 ///
 /// let input = "diff --git a/img.png b/img.png\nBinary files differ\n";
+///
+/// // Default: binary patches are parsed
 /// let patches: Vec<_> = Patches::parse(input, ParseOptions::gitdiff())
 ///     .collect::<Result<_, _>>()
 ///     .unwrap();
-/// assert!(patches.is_empty()); // binary was skipped
+/// assert_eq!(patches.len(), 1);
+/// assert!(matches!(patches[0].patch(), PatchKind::Binary(BinaryPatch::Marker)));
 ///
+/// // Skip binary patches
+/// let patches: Vec<_> = Patches::parse(input, ParseOptions::gitdiff().skip_binary())
+///     .collect::<Result<_, _>>()
+///     .unwrap();
+/// assert!(patches.is_empty());
+///
+/// // Fail on binary patches
 /// let result: Result<Vec<_>, _> = Patches::parse(input, ParseOptions::gitdiff().fail_on_binary())
 ///     .collect();
 /// assert!(result.is_err());
@@ -89,7 +100,7 @@ impl ParseOptions {
     pub fn unidiff() -> Self {
         Self {
             format: Format::UniDiff,
-            binary: Binary::Skip,
+            binary: Default::default(),
         }
     }
 
@@ -106,7 +117,7 @@ impl ParseOptions {
     pub fn gitdiff() -> Self {
         Self {
             format: Format::GitDiff,
-            binary: Binary::Skip,
+            binary: Default::default(),
         }
     }
 
