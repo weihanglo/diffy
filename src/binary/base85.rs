@@ -58,7 +58,6 @@ impl std::error::Error for Base85Error {}
 /// When decoding data where the original byte count isn't a multiple of 4,
 /// callers must handle truncation at a higher level.
 /// For example, via a length indicator in Git binary patch.
-#[allow(dead_code)] // will be used for binary patch
 pub fn decode_into(input: &str, output: &mut impl Extend<u8>) -> Result<(), Base85Error> {
     let bytes = input.as_bytes();
 
