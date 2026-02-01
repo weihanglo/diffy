@@ -5,6 +5,8 @@
 //!
 //! Based on [DiffX Binary Diffs specification](https://diffx.org/spec/binary-diffs.html).
 
+#[cfg(feature = "binary")]
+mod base85;
 use std::borrow::Cow;
 use std::fmt;
 
