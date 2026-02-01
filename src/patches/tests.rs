@@ -639,7 +639,7 @@ Binary files a/image.png and b/image.png differ
         assert_eq!(patches.len(), 1);
         assert!(matches!(
             patches[0].patch().as_binary().unwrap(),
-            BinaryPatch::NoData
+            BinaryPatch::Marker
         ));
         assert_eq!(
             patches[0].operation(),
@@ -666,7 +666,7 @@ Binary files /dev/null and b/binary.bin differ
         assert_eq!(patches.len(), 1);
         assert!(matches!(
             patches[0].patch().as_binary().unwrap(),
-            BinaryPatch::NoData
+            BinaryPatch::Marker
         ));
         assert_eq!(
             patches[0].operation(),
@@ -690,7 +690,7 @@ Binary files a/binary.bin and /dev/null differ
         assert_eq!(patches.len(), 1);
         assert!(matches!(
             patches[0].patch().as_binary().unwrap(),
-            BinaryPatch::NoData
+            BinaryPatch::Marker
         ));
         assert_eq!(
             patches[0].operation(),
@@ -750,7 +750,7 @@ index c182a93..a39caff 100644
         assert_eq!(patches.len(), 2);
         assert!(matches!(
             patches[0].patch().as_binary().unwrap(),
-            BinaryPatch::NoData
+            BinaryPatch::Marker
         ));
         assert_eq!(patches[1].patch().as_text().unwrap().hunks().len(), 1);
         assert_eq!(
@@ -783,7 +783,7 @@ Binary files a/binary.bin and b/binary.bin differ
         assert_eq!(patches[0].patch().as_text().unwrap().hunks().len(), 1);
         assert!(matches!(
             patches[1].patch().as_binary(),
-            Some(BinaryPatch::NoData)
+            Some(BinaryPatch::Marker)
         ));
     }
 
@@ -807,11 +807,11 @@ Binary files /dev/null and b/b.png differ
         assert_eq!(patches.len(), 2);
         assert!(matches!(
             patches[0].patch().as_binary(),
-            Some(BinaryPatch::NoData)
+            Some(BinaryPatch::Marker)
         ));
         assert!(matches!(
             patches[1].patch().as_binary(),
-            Some(BinaryPatch::NoData)
+            Some(BinaryPatch::Marker)
         ));
     }
 

@@ -382,7 +382,7 @@ pub fn apply_diffy(
 
                 write_modified(result.as_bytes());
             }
-            PatchKind::Binary(BinaryPatch::NoData) => {
+            PatchKind::Binary(BinaryPatch::Marker) => {
                 // Dont do anything if it is just a binary patch marker.
             }
             PatchKind::Binary(patch) => {

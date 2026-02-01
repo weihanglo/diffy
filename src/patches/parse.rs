@@ -169,7 +169,7 @@ impl<'a> Patches<'a> {
                     };
                     return Some(Ok(FilePatch::new_binary(
                         operation,
-                        crate::binary::BinaryPatch::NoData,
+                        crate::binary::BinaryPatch::Marker,
                         old_mode,
                         new_mode,
                     )));

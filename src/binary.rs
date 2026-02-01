@@ -39,13 +39,13 @@ pub enum BinaryPatch<'a> {
         /// Delta instructions: modified -> original.
         reverse: BinaryData<'a>,
     },
-    /// Binary file changed but no patch data available,
+    /// A Git binary diff marker.
     ///
     /// This represents the `Binary files a/path and b/path differ` case,
     /// where git detected a binary change but didn't include the actual data
     ///
     /// Calling [`apply()`](Self::apply) on this variant returns an error.
-    NoData,
+    Marker,
 }
 
 impl<'a> BinaryPatch<'a> {
@@ -67,7 +67,7 @@ impl<'a> BinaryPatch<'a> {
                 delta::apply(original, &delta_instructions)
                     .map_err(|e| BinaryPatchParseError::new(e.to_string()))
             }
-            BinaryPatch::NoData => Err(BinaryPatchParseError::new("no binary data available")),
+            BinaryPatch::Marker => Err(BinaryPatchParseError::new("no binary data available")),
         }
     }
 
@@ -89,7 +89,7 @@ impl<'a> BinaryPatch<'a> {
                 delta::apply(modified, &delta_instructions)
                     .map_err(|e| BinaryPatchParseError::new(e.to_string()))
             }
-            BinaryPatch::NoData => Err(BinaryPatchParseError::new("no binary data available")),
+            BinaryPatch::Marker => Err(BinaryPatchParseError::new("no binary data available")),
         }
     }
 
