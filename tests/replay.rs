@@ -57,6 +57,7 @@ use std::sync::Mutex;
 
 use diffy::patches::FileOperation;
 use diffy::patches::ParseOptions;
+use diffy::patches::PatchKind;
 use diffy::patches::Patches;
 use rayon::prelude::*;
 

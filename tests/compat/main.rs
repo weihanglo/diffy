@@ -1,8 +1,8 @@
 //! Compatibility tests against reference implementations.
 //!
 //! These tests verify diffy produces results compatible with established tools
-//! (git, GNU patch). Focus is on **edge cases and ambiguous behavior**, not
-//! basic functionality which is covered by unit tests in `src/patchset/tests.rs`.
+//!  Focus is on **edge cases and ambiguous behavior**,
+//!  not basic functionality which is covered by unit tests in `src/patchset/tests.rs`.
 //!
 //! ## Test structure
 //!
@@ -20,22 +20,25 @@
 //!
 //! ```sh
 //! # Run all compat tests
-//! cargo test --test compat
+//! cargo test --test compat -F binary
 //!
 //! # Run with reference tool comparison (CI mode)
-//! CI=1 cargo test --test compat
+//! CI=1 cargo test --test compat -F binary
+//!
+//! # For Nix users, run this to ensure you have GNU patch
+//! CI=1 nix shell nixpkgs#gnupatch  -c cargo test --test compat -F binary
 //! ```
 //!
 //! ## Regenerating snapshots
 //!
 //! ```sh
-//! SNAPSHOTS=overwrite cargo test --test compat
+//! SNAPSHOTS=overwrite cargo test --test compat -F binary
 //! ```
 //!
 //! ## Adding new test cases
 //!
 //! 1. Create `case_name/in/` with input file(s) and `foo.patch`
-//! 2. Run `SNAPSHOTS=overwrite cargo test --test compat` to generate `out/`
+//! 2. Run `SNAPSHOTS=overwrite cargo test --test compat -F binary` to generate `out/`
 //! 3. Add `#[test] fn case_name() { run_case(...).unwrap(); }` in the module
 //!
 //! For failure tests, use `.unwrap_err()` and skip step 2.
