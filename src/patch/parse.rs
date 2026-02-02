@@ -1,8 +1,8 @@
 //! Parse a Patch
 
 use std::borrow::Cow;
-use std::fmt;
 
+use super::error::ParsePatchError;
 use super::Hunk;
 use super::HunkRange;
 use super::Line;
@@ -13,27 +13,6 @@ use crate::utils::LineIter;
 use crate::utils::Text;
 
 type Result<T, E = ParsePatchError> = std::result::Result<T, E>;
-
-/// An error returned when parsing a `Patch` using [`Patch::from_str`] fails
-///
-/// [`Patch::from_str`]: struct.Patch.html#method.from_str
-// TODO use a custom error type instead of a Cow
-#[derive(Debug)]
-pub struct ParsePatchError(Cow<'static, str>);
-
-impl ParsePatchError {
-    pub(crate) fn new<E: Into<Cow<'static, str>>>(e: E) -> Self {
-        Self(e.into())
-    }
-}
-
-impl fmt::Display for ParsePatchError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "error parsing patch: {}", self.0)
-    }
-}
-
-impl std::error::Error for ParsePatchError {}
 
 struct Parser<'a, T: Text + ?Sized> {
     lines: std::iter::Peekable<LineIter<'a, T>>,

@@ -9,9 +9,9 @@
 mod base85;
 #[cfg(feature = "binary")]
 mod delta;
+mod error;
 
-use std::borrow::Cow;
-use std::fmt;
+pub use error::BinaryPatchParseError;
 
 /// The type of a binary patch block.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -310,24 +310,6 @@ fn decode_line_length(c: u8) -> Option<usize> {
         _ => None,
     }
 }
-
-/// Error type for binary patch operations.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BinaryPatchParseError(Cow<'static, str>);
-
-impl BinaryPatchParseError {
-    pub(crate) fn new<E: Into<Cow<'static, str>>>(e: E) -> Self {
-        Self(e.into())
-    }
-}
-
-impl fmt::Display for BinaryPatchParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl std::error::Error for BinaryPatchParseError {}
 
 #[cfg(test)]
 mod tests {
