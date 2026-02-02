@@ -46,7 +46,6 @@ jobs:
       matrix:
         parse_mode: [unidiff, gitdiff]
     name: ${{ inputs.name && matrix.parse_mode || format('{0} ({1}, {2})', inputs.repo_url, matrix.parse_mode, inputs.commits) }}
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v6
         with:
