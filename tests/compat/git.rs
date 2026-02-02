@@ -151,3 +151,17 @@ fn binary_delta_wrong_original() {
         .expect_success(false)
         .run();
 }
+
+// Binary patch with mixed delta/literal format.
+//
+// Git can choose different encodings for forward and reverse transformations
+// based on which is more efficient. This patch has:
+// - forward (original → modified): delta
+// - reverse (modified → original): literal
+//
+// From rust-lang/rust@ad46af24 (favicon-32x32.png update).
+#[test]
+#[cfg(feature = "binary")]
+fn binary_mixed_delta_literal() {
+    Case::git("binary_mixed_delta_literal").strip(1).run();
+}
