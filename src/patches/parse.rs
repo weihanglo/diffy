@@ -9,6 +9,7 @@ use super::FilePatch;
 use super::Format;
 use super::ParseOptions;
 use super::PatchSetParseError;
+use crate::binary::parse_binary_patch;
 use crate::patch::parse::parse_one;
 use crate::utils::escaped_filename;
 use crate::Patch;
@@ -144,12 +145,11 @@ impl<'a> Patches<'a> {
         let git_diff = GitDiff::new(self.input, patch_start, patch_end, header_end);
         let header = GitHeader::parse(git_diff.header);
 
-        // Handle binary diffs
-        if header.is_binary {
+        // Handle "Binary files differ" (no patch data)
+        if header.is_binary_marker {
             self.offset = patch_end;
             match self.opts.binary {
                 Binary::Skip => {
-                    // Recurse to get next non-binary patch
                     return self.next_gitdiff_patch();
                 }
                 Binary::Fail => {
@@ -157,6 +157,60 @@ impl<'a> Patches<'a> {
                     return Some(Err(PatchSetParseError::new(format!(
                         "binary diff not supported: {path}"
                     ))));
+                }
+                Binary::Keep => {
+                    let operation = match extract_file_op_binary(&header) {
+                        Ok(op) => op,
+                        Err(e) => return Some(Err(e)),
+                    };
+                    let (old_mode, new_mode) = match parse_file_modes(&header) {
+                        Ok(modes) => modes,
+                        Err(e) => return Some(Err(e)),
+                    };
+                    return Some(Ok(FilePatch::new_binary(
+                        operation,
+                        crate::binary::BinaryPatch::Marker,
+                        old_mode,
+                        new_mode,
+                    )));
+                }
+            }
+        }
+
+        // Handle "GIT binary patch" (has patch data)
+        if header.is_binary_patch {
+            self.offset = patch_end;
+            match self.opts.binary {
+                Binary::Skip => {
+                    return self.next_gitdiff_patch();
+                }
+                Binary::Fail => {
+                    let path = header.diff_git_line.unwrap_or("<unknown>");
+                    return Some(Err(PatchSetParseError::new(format!(
+                        "binary diff not supported: {path}"
+                    ))));
+                }
+                Binary::Keep => {
+                    // Find "GIT binary patch" in header and parse from there
+                    let binary_start = git_diff.header.find("GIT binary patch").unwrap_or(0);
+                    let binary_patch = match parse_binary_patch(&git_diff.header[binary_start..]) {
+                        Ok(bp) => bp,
+                        Err(e) => return Some(Err(PatchSetParseError::new(e.to_string()))),
+                    };
+                    let operation = match extract_file_op_binary(&header) {
+                        Ok(op) => op,
+                        Err(e) => return Some(Err(e)),
+                    };
+                    let (old_mode, new_mode) = match parse_file_modes(&header) {
+                        Ok(modes) => modes,
+                        Err(e) => return Some(Err(e)),
+                    };
+                    return Some(Ok(FilePatch::new_binary(
+                        operation,
+                        binary_patch,
+                        old_mode,
+                        new_mode,
+                    )));
                 }
             }
         }
@@ -420,6 +474,57 @@ pub fn extract_file_op_unidiff<'a>(
 }
 
 /// Determines the file operation using git headers and patch paths.
+/// Extracts file operation for binary patches (no ---/+++ headers).
+fn extract_file_op_binary<'a>(
+    header: &GitHeader<'a>,
+) -> Result<FileOperation<'a>, PatchSetParseError> {
+    // Git headers are authoritative for rename/copy
+    if let (Some(from), Some(to)) = (header.rename_from, header.rename_to) {
+        return Ok(FileOperation::Rename {
+            from: Cow::Borrowed(from),
+            to: Cow::Borrowed(to),
+        });
+    }
+    if let (Some(from), Some(to)) = (header.copy_from, header.copy_to) {
+        return Ok(FileOperation::Copy {
+            from: Cow::Borrowed(from),
+            to: Cow::Borrowed(to),
+        });
+    }
+
+    // Use `diff --git <old> <new>` for binary patches.
+    let Some((original, modified)) = header.diff_git_line.and_then(parse_diff_git_path) else {
+        return Err(PatchSetParseError::new("unable to parse `diff --git` path"));
+    };
+
+    let op = if header.new_file_mode.is_some() {
+        FileOperation::Create(modified)
+    } else if header.deleted_file_mode.is_some() {
+        FileOperation::Delete(original)
+    } else {
+        FileOperation::Modify { original, modified }
+    };
+
+    Ok(op)
+}
+
+/// Parses file modes from git extended headers.
+fn parse_file_modes(
+    header: &GitHeader<'_>,
+) -> Result<(Option<FileMode>, Option<FileMode>), PatchSetParseError> {
+    let old_mode = header
+        .old_mode
+        .or(header.deleted_file_mode)
+        .map(str::parse::<FileMode>)
+        .transpose()?;
+    let new_mode = header
+        .new_mode
+        .or(header.new_file_mode)
+        .map(str::parse::<FileMode>)
+        .transpose()?;
+    Ok((old_mode, new_mode))
+}
+
 fn extract_file_op_gitdiff<'a>(
     header: &GitHeader<'a>,
     patch: &Patch<'a, str>,
@@ -699,32 +804,33 @@ struct GitHeader<'a> {
     new_file_mode: Option<&'a str>,
     /// File mode from `deleted file mode <mode>`.
     deleted_file_mode: Option<&'a str>,
-    /// Whether this is a binary file diff.
+    /// Whether this is a binary diff that contains no patch content.
+    /// Observed git diff output patterns `git diff` without `--binary`:
     ///
-    /// Observed git diff output patterns:
+    /// ```text
+    /// diff --git a/image.png b/image.png
+    /// new file mode 100644
+    /// index 0000000..7c4530c
+    /// Binary files /dev/null and b/image.png differ
+    /// ```
+    is_binary_marker: bool,
+    /// Whether this is a binary diff that contains actual patch content.
     ///
-    /// 1. `git diff` without `--binary`:
-    ///    ```text
-    ///    diff --git a/image.png b/image.png
-    ///    new file mode 100644
-    ///    index 0000000..7c4530c
-    ///    Binary files /dev/null and b/image.png differ
-    ///    ```
+    /// Observed git diff output patterns from `git diff --binary`:
     ///
-    /// 2. `git diff --binary`:
-    ///    ```text
-    ///    diff --git a/image.png b/image.png
-    ///    new file mode 100644
-    ///    index 0000000000000000000000000000000000000000..7c4530ccf8ce9bf6926f9c86633cf47cdc31ee58
-    ///    GIT binary patch
-    ///    literal 67
-    ///    zcmV-J0KET+P)<h;3K|Lk000e1NJLTq00031000391^@s69~H!j0000ANkl<Zc${PS
-    ///    Z4*&oG0RROU*iHZd002ovPDHLkV1i)*3{U_7
+    /// ```text
+    /// diff --git a/image.png b/image.png
+    /// new file mode 100644
+    /// index 0000000000000000000000000000000000000000..7c4530ccf8ce9bf6926f9c86633cf47cdc31ee58
+    /// GIT binary patch
+    /// literal 67
+    /// zcmV-J0KET+P)<h;3K|Lk000e1NJLTq00031000391^@s69~H!j0000ANkl<Zc${PS
+    /// Z4*&oG0RROU*iHZd002ovPDHLkV1i)*3{U_7
     ///
-    ///    literal 0
-    ///    KcmV+b0RR6000031
-    ///    ```
-    is_binary: bool,
+    /// literal 0
+    /// KcmV+b0RR6000031
+    /// ```
+    is_binary_patch: bool,
 }
 
 impl<'a> GitHeader<'a> {
@@ -751,8 +857,10 @@ impl<'a> GitHeader<'a> {
                 header.new_file_mode = Some(mode);
             } else if let Some(mode) = line.strip_prefix("deleted file mode ") {
                 header.deleted_file_mode = Some(mode);
-            } else if line.starts_with("Binary files ") || line.starts_with("GIT binary patch") {
-                header.is_binary = true;
+            } else if line.starts_with("Binary files ") {
+                header.is_binary_marker = true;
+            } else if line.starts_with("GIT binary patch") {
+                header.is_binary_patch = true;
             }
             // Ignored: similarity index, dissimilarity index, index
         }

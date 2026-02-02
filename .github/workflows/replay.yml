@@ -62,7 +62,7 @@ jobs:
             git clone ${{ inputs.repo_url }} --depth $(( ${{ inputs.commits }} + 1 )) target/test-repo
           fi
       - run: rustup toolchain install stable --profile minimal
-      - run: cargo test --release --test replay -- --nocapture
+      - run: cargo test --release --test replay -F binary -- --nocapture
         env:
           DIFFY_TEST_REPO: ${{ inputs.repo_url == '' && '.' || 'target/test-repo' }}
           DIFFY_TEST_COMMITS: ${{ inputs.commits }}

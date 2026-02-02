@@ -97,18 +97,57 @@ fn junk_between_files() {
     Case::git("junk_between_files").strip(1).run();
 }
 
-// Mixed binary and text patch - git applies text only, diffy applies both.
+// Mixed binary and text patch.
 //
-// - git apply: skips binary, applies text change
-// - diffy: parses both, applies text correctly but also writes empty binary
-//
-// expect_compat(false): diffy outputs extra empty image.png, git does not
-//
-// The text portion should be applied correctly by both tools.
+// Both git apply and diffy should apply both the binary and text changes.
 #[test]
 fn binary_and_text_mixed() {
-    Case::git("binary_and_text_mixed")
+    Case::git("binary_and_text_mixed").strip(1).run();
+}
+
+// Binary patch in literal format (new file creation).
+#[test]
+#[cfg(feature = "binary")]
+fn binary_literal() {
+    Case::git("binary_literal").strip(1).run();
+}
+
+// Binary patch in delta format (modify existing file).
+#[test]
+#[cfg(feature = "binary")]
+fn binary_delta() {
+    Case::git("binary_delta").strip(1).run();
+}
+
+// Binary literal patch applied to wrong original content.
+//
+// This documents a behavioral difference:
+// - diffy: succeeds (skips validation, ignores original for literal format)
+// - git: fails (validates original content via index hash before applying)
+//
+// diffy's behavior is intentional - we don't have access to git's object database
+// to verify hashes, and for literal format the original content isn't needed anyway.
+#[test]
+#[cfg(feature = "binary")]
+fn binary_literal_wrong_original() {
+    Case::git("binary_literal_wrong_original")
         .strip(1)
         .expect_compat(false)
+        .run();
+}
+
+// Binary delta patch applied to wrong original content.
+//
+// Both diffy and git fail, but for different reasons:
+// - diffy: fails because delta instructions reference wrong offsets/sizes
+// - git: fails because index hash doesn't match before even trying to apply
+//
+// This test verifies diffy correctly rejects invalid delta applications.
+#[test]
+#[cfg(feature = "binary")]
+fn binary_delta_wrong_original() {
+    Case::git("binary_delta_wrong_original")
+        .strip(1)
+        .expect_success(false)
         .run();
 }

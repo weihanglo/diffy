@@ -55,8 +55,10 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Mutex;
 
+use diffy::binary::BinaryPatch;
 use diffy::patches::FileOperation;
 use diffy::patches::ParseOptions;
+use diffy::patches::PatchKind;
 use diffy::patches::Patches;
 use rayon::prelude::*;
 
@@ -184,13 +186,10 @@ fn is_submodule(repo: &PathBuf, commit: &str, path: &str) -> bool {
     String::from_utf8_lossy(&output.stdout).trim() == "160000"
 }
 
-/// Get file content at a specific commit.
+/// Get file content at a specific commit as bytes.
 ///
-/// Returns `None` if:
-///
-/// * The path is a submodule
-/// * The file is binary (not valid UTF-8)
-fn file_at_commit(repo: &PathBuf, commit: &str, path: &str) -> Option<String> {
+/// Returns `None` if the path is a submodule.
+fn file_at_commit_bytes(repo: &PathBuf, commit: &str, path: &str) -> Option<Vec<u8>> {
     if is_submodule(repo, commit, path) {
         return None;
     }
@@ -208,8 +207,17 @@ fn file_at_commit(repo: &PathBuf, commit: &str, path: &str) -> Option<String> {
         panic!("file {path} doesn't exist at {commit}: {stderr}");
     }
 
-    // None for binary files (non-UTF8)
-    String::from_utf8(output.stdout).ok()
+    Some(output.stdout)
+}
+
+/// Get file content at a specific commit as text.
+///
+/// Returns `None` if:
+///
+/// * The path is a submodule
+/// * The file is binary (not valid UTF-8)
+fn file_at_commit(repo: &PathBuf, commit: &str, path: &str) -> Option<String> {
+    file_at_commit_bytes(repo, commit, path).and_then(|b| String::from_utf8(b).ok())
 }
 
 /// Get the list of commits from oldest to newest.
@@ -253,9 +261,10 @@ fn process_commit(repo: &PathBuf, parent: &str, child: &str, mode: TestMode) -> 
 
     // UniDiff format cannot express pure renames (no ---/+++ headers).
     // Use `--no-renames` to represent them as delete + create instead.
+    // GitDiff mode uses `--binary` to get actual binary patch data.
     let diff_output = match mode {
         TestMode::UniDiff => git(repo, &["diff", "--no-renames", parent, child]),
-        TestMode::GitDiff => git(repo, &["diff", parent, child]),
+        TestMode::GitDiff => git(repo, &["diff", "--binary", parent, child]),
     };
 
     if diff_output.is_empty() {
@@ -271,39 +280,33 @@ fn process_commit(repo: &PathBuf, parent: &str, child: &str, mode: TestMode) -> 
 
     // Calculate expected file count BEFORE parsing.
     // This allows early return for binary-only commits.
-    let (expected_file_count, skipped_file_count) = match mode {
+    let expected_file_count = match mode {
         TestMode::UniDiff => {
             // `--numstat` format:
             // - `added\tdeleted\tpath` for text files
-            // - `-\t-\tpath` for binary files
-            // - `0\t0\tpath` for empty/no-content changes
+            // - `-\t-\tpath` for binary files (skipped - no patch data in unidiff)
+            // - `0\t0\tpath` for empty/no-content changes (skipped)
             let numstat = git(repo, &["diff", "--numstat", "--no-renames", parent, child]);
             numstat
                 .lines()
                 .filter(|l| !l.is_empty())
-                .fold((0, 0), |(expected, skipped), line| {
+                .fold((0, 0), |(expected, pre_skipped), line| {
                     if line.starts_with("-\t-\t") || line.starts_with("0\t0\t") {
-                        (expected, skipped + 1)
+                        skipped += 1;
+                        (expected, pre_skipped + 1)
                     } else {
-                        (expected + 1, skipped)
+                        (expected + 1, pre_skipped)
                     }
                 })
+                .0
         }
         TestMode::GitDiff => {
-            // Can't use `--numstat` for GitDiff: it shows `-\t-\t` for both
-            // actual binary diffs AND pure binary renames (100% similarity).
-            // Parser correctly handles pure renames (rename headers, no binary content).
-            // Use `--raw` for total count, subtract actual binary markers from diff.
+            // With `--binary`, all files including binary ones have patch data.
+            // Use `--raw` to count total files changed.
             let raw = git(repo, &["diff", "--raw", parent, child]);
-            let total = raw.lines().filter(|l| !l.is_empty()).count();
-            let binary = diff_output
-                .lines()
-                .filter(|l| l.starts_with("Binary files ") || l.starts_with("GIT binary patch"))
-                .count();
-            (total - binary, binary)
+            raw.lines().filter(|l| !l.is_empty()).count()
         }
     };
-    skipped += skipped_file_count;
 
     if expected_file_count == 0 {
         return CommitResult {
@@ -341,88 +344,130 @@ fn process_commit(repo: &PathBuf, parent: &str, child: &str, mode: TestMode) -> 
         // Paths from git extended headers (rename/copy) are already clean.
         let operation = file_patch.operation();
 
-        let (base_content, expected_content, desc) = match operation {
-            FileOperation::Create(path) => {
-                // Create paths come from +++ header, strip a/b prefix
-                let path = strip_path_prefix(path, 1);
-                let Some(expected) = file_at_commit(repo, child, &path) else {
-                    skipped += 1;
-                    continue;
-                };
-                (String::new(), expected, format!("create {path}"))
-            }
-            FileOperation::Delete(path) => {
-                // Delete paths come from --- header, strip a/b prefix
-                let path = strip_path_prefix(path, 1);
-                let Some(base) = file_at_commit(repo, parent, &path) else {
-                    skipped += 1;
-                    continue;
-                };
-                (base, String::new(), format!("delete {path}"))
-            }
-            FileOperation::Modify { original, modified } => {
-                // Modify paths come from ---/+++ headers, strip a/b prefix
-                let original = strip_path_prefix(original, 1);
-                let modified = strip_path_prefix(modified, 1);
-                let Some(base) = file_at_commit(repo, parent, &original) else {
-                    skipped += 1;
-                    continue;
-                };
-                let Some(expected) = file_at_commit(repo, child, &modified) else {
-                    skipped += 1;
-                    continue;
-                };
-                let desc = if original == modified {
-                    format!("modify {original}")
+        // Extract path info from operation. Returns (base_path, target_path, desc, strip_prefix).
+        // strip_prefix is 1 for ---/+++ paths (have a/b prefix), 0 for git header paths.
+        let (base_path, target_path, desc, strip): (Option<&str>, Option<&str>, _, _) =
+            match operation {
+                FileOperation::Create(path) => {
+                    (None, Some(path.as_ref()), format!("create {path}"), 1)
+                }
+                FileOperation::Delete(path) => {
+                    (Some(path.as_ref()), None, format!("delete {path}"), 1)
+                }
+                FileOperation::Modify { original, modified } => {
+                    let desc = if original == modified {
+                        format!("modify {original}")
+                    } else {
+                        format!("modify {original} -> {modified}")
+                    };
+                    (Some(original.as_ref()), Some(modified.as_ref()), desc, 1)
+                }
+                // Rename/Copy paths come from git headers WITHOUT a/b prefix
+                FileOperation::Rename { from, to } => (
+                    Some(from.as_ref()),
+                    Some(to.as_ref()),
+                    format!("rename {from} -> {to}"),
+                    0,
+                ),
+                FileOperation::Copy { from, to } => (
+                    Some(from.as_ref()),
+                    Some(to.as_ref()),
+                    format!("copy {from} -> {to}"),
+                    0,
+                ),
+            };
+
+        match file_patch.patch() {
+            PatchKind::Text(patch) => {
+                let base_content = if let Some(path) = base_path {
+                    let path = strip_path_prefix(path, strip);
+                    let Some(content) = file_at_commit(repo, parent, &path) else {
+                        skipped += 1;
+                        continue;
+                    };
+                    content
                 } else {
-                    format!("modify {original} -> {modified}")
+                    String::new()
                 };
-                (base, expected, desc)
-            }
-            // Rename/Copy paths come from git headers WITHOUT a/b prefix
-            FileOperation::Rename { from, to } => {
-                let Some(base) = file_at_commit(repo, parent, from) else {
-                    skipped += 1;
-                    continue;
-                };
-                let Some(expected) = file_at_commit(repo, child, to) else {
-                    skipped += 1;
-                    continue;
-                };
-                (base, expected, format!("rename {from} -> {to}"))
-            }
-            FileOperation::Copy { from, to } => {
-                let Some(base) = file_at_commit(repo, parent, from) else {
-                    skipped += 1;
-                    continue;
-                };
-                let Some(expected) = file_at_commit(repo, child, to) else {
-                    skipped += 1;
-                    continue;
-                };
-                (base, expected, format!("copy {from} -> {to}"))
-            }
-        };
 
-        let patch = file_patch.patch();
-        let result = match diffy::apply(&base_content, patch) {
-            Ok(r) => r,
-            Err(e) => {
-                panic!(
-                    "Failed to apply patch at {parent_short}..{child_short} for {desc}: {e}\n\n\
-                    Patch:\n{patch}\n\n\
-                    Base content:\n{base_content}"
-                );
-            }
-        };
+                let expected_content = if let Some(path) = target_path {
+                    let path = strip_path_prefix(path, strip);
+                    let Some(content) = file_at_commit(repo, child, &path) else {
+                        skipped += 1;
+                        continue;
+                    };
+                    content
+                } else {
+                    String::new()
+                };
 
-        if result != expected_content {
-            panic!(
-                "Content mismatch at {parent_short}..{child_short} for {desc}\n\n\
-                --- Expected ---\n{expected_content}\n\n\
-                --- Got ---\n{result}\n\n\
-                --- Patch ---\n{patch}"
-            );
+                let result = match diffy::apply(&base_content, patch) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        panic!(
+                            "Failed to apply patch at {parent_short}..{child_short} for {desc}: {e}\n\n\
+                            Patch:\n{patch}\n\n\
+                            Base content:\n{base_content}"
+                        );
+                    }
+                };
+
+                if result != expected_content {
+                    panic!(
+                        "Content mismatch at {parent_short}..{child_short} for {desc}\n\n\
+                        --- Expected ---\n{expected_content}\n\n\
+                        --- Got ---\n{result}\n\n\
+                        --- Patch ---\n{patch}"
+                    );
+                }
+            }
+            PatchKind::Binary(BinaryPatch::Marker) => {
+                // `Binary files differ` marker - no actual data to apply
+                skipped += 1;
+                continue;
+            }
+            PatchKind::Binary(patch) => {
+                // Get content as bytes
+                let base_content = if let Some(path) = base_path {
+                    let path = strip_path_prefix(path, strip);
+                    let Some(content) = file_at_commit_bytes(repo, parent, &path) else {
+                        skipped += 1;
+                        continue;
+                    };
+                    content
+                } else {
+                    Vec::new()
+                };
+
+                let expected_content = if let Some(path) = target_path {
+                    let path = strip_path_prefix(path, strip);
+                    let Some(content) = file_at_commit_bytes(repo, child, &path) else {
+                        skipped += 1;
+                        continue;
+                    };
+                    content
+                } else {
+                    Vec::new()
+                };
+
+                let result = match patch.apply(&base_content) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        panic!(
+                            "Failed to apply binary patch at {parent_short}..{child_short} for {desc}: {e}"
+                        );
+                    }
+                };
+
+                if result != expected_content {
+                    panic!(
+                        "Binary content mismatch at {parent_short}..{child_short} for {desc}\n\n\
+                        Expected {} bytes, got {} bytes",
+                        expected_content.len(),
+                        result.len()
+                    );
+                }
+            }
         }
 
         applied += 1;

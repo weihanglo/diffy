@@ -11,6 +11,7 @@ mod tests;
 use std::borrow::Cow;
 use std::fmt;
 
+use crate::binary::BinaryPatch;
 use crate::Patch;
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -26,10 +27,12 @@ pub(crate) enum Format {
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) enum Binary {
     /// Skip binary diffs silently.
-    #[default]
     Skip,
     /// Return error if binary diff encountered.
     Fail,
+    /// Keep binary diffs in output.
+    #[default]
+    Keep,
 }
 
 /// Options for parsing patch content.
@@ -47,19 +50,30 @@ pub(crate) enum Binary {
 /// Note that this is not a documented Git behavior,
 /// so the implementation here is subject to change ifn Git changes
 ///
-/// By default, binary diffs are skipped.
+/// By default, binary diffs are kept (parsed but may not be applicable).
 ///
 /// ## Example
 ///
 /// ```
-/// use diffy::patches::{ParseOptions, Patches};
+/// use diffy::patches::{ParseOptions, Patches, PatchKind};
+/// use diffy::binary::BinaryPatch;
 ///
 /// let input = "diff --git a/img.png b/img.png\nBinary files differ\n";
+///
+/// // Default: binary patches are parsed
 /// let patches: Vec<_> = Patches::parse(input, ParseOptions::gitdiff())
 ///     .collect::<Result<_, _>>()
 ///     .unwrap();
-/// assert!(patches.is_empty()); // binary was skipped
+/// assert_eq!(patches.len(), 1);
+/// assert!(matches!(patches[0].patch(), PatchKind::Binary(BinaryPatch::Marker)));
 ///
+/// // Skip binary patches
+/// let patches: Vec<_> = Patches::parse(input, ParseOptions::gitdiff().skip_binary())
+///     .collect::<Result<_, _>>()
+///     .unwrap();
+/// assert!(patches.is_empty());
+///
+/// // Fail on binary patches
 /// let result: Result<Vec<_>, _> = Patches::parse(input, ParseOptions::gitdiff().fail_on_binary())
 ///     .collect();
 /// assert!(result.is_err());
@@ -86,7 +100,7 @@ impl ParseOptions {
     pub fn unidiff() -> Self {
         Self {
             format: Format::UniDiff,
-            binary: Binary::Skip,
+            binary: Default::default(),
         }
     }
 
@@ -103,7 +117,7 @@ impl ParseOptions {
     pub fn gitdiff() -> Self {
         Self {
             format: Format::GitDiff,
-            binary: Binary::Skip,
+            binary: Default::default(),
         }
     }
 
@@ -116,6 +130,16 @@ impl ParseOptions {
     /// Return an error if a binary diff is encountered.
     pub fn fail_on_binary(mut self) -> Self {
         self.binary = Binary::Fail;
+        self
+    }
+
+    /// Keep binary diffs in output.
+    ///
+    /// Binary patches are included as [`PatchKind::Binary`] variants.
+    /// The actual decoding (base85 + zlib) happens lazily
+    /// when [`BinaryPatch::apply()`] is called.
+    pub fn keep_binary(mut self) -> Self {
+        self.binary = Binary::Keep;
         self
     }
 }
@@ -149,15 +173,55 @@ impl std::str::FromStr for FileMode {
     }
 }
 
+/// The kind of patch content in a [`FilePatch`].
+#[derive(Clone, PartialEq, Eq)]
+pub enum PatchKind<'a, T: ToOwned + ?Sized> {
+    /// Text patch with hunks.
+    Text(Patch<'a, T>),
+    /// Binary patch.
+    Binary(BinaryPatch<'a>),
+}
+
+impl<T: ?Sized, O> std::fmt::Debug for PatchKind<'_, T>
+where
+    T: ToOwned<Owned = O> + std::fmt::Debug,
+    O: std::borrow::Borrow<T> + std::fmt::Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PatchKind::Text(patch) => f.debug_tuple("Text").field(patch).finish(),
+            PatchKind::Binary(binary) => f.debug_tuple("Binary").field(binary).finish(),
+        }
+    }
+}
+
+impl<'a, T: ToOwned + ?Sized> PatchKind<'a, T> {
+    /// Returns the text patch, or `None` if this is a binary patch.
+    pub fn as_text(&self) -> Option<&Patch<'a, T>> {
+        match self {
+            PatchKind::Text(patch) => Some(patch),
+            PatchKind::Binary(_) => None,
+        }
+    }
+
+    /// Returns the binary patch, or `None` if this is a text patch.
+    pub fn as_binary(&self) -> Option<&BinaryPatch<'a>> {
+        match self {
+            PatchKind::Text(_) => None,
+            PatchKind::Binary(binary) => Some(binary),
+        }
+    }
+}
+
 /// A single file's patch with operation metadata.
 ///
-/// This combines a [`Patch`] with a [`FileOperation`]
+/// This combines a [`PatchKind`] with a [`FileOperation`]
 /// that indicates what kind of file operation this patch represents
 /// (create, delete, modify, or rename).
 #[derive(Clone, PartialEq, Eq)]
 pub struct FilePatch<'a, T: ToOwned + ?Sized> {
     operation: FileOperation<'a>,
-    patch: Patch<'a, T>,
+    kind: PatchKind<'a, T>,
     old_mode: Option<FileMode>,
     new_mode: Option<FileMode>,
 }
@@ -170,7 +234,7 @@ where
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FilePatch")
             .field("operation", &self.operation)
-            .field("patch", &self.patch)
+            .field("kind", &self.kind)
             .field("old_mode", &self.old_mode)
             .field("new_mode", &self.new_mode)
             .finish()
@@ -186,7 +250,21 @@ impl<'a, T: ToOwned + ?Sized> FilePatch<'a, T> {
     ) -> Self {
         Self {
             operation,
-            patch,
+            kind: PatchKind::Text(patch),
+            old_mode,
+            new_mode,
+        }
+    }
+
+    fn new_binary(
+        operation: FileOperation<'a>,
+        binary: BinaryPatch<'a>,
+        old_mode: Option<FileMode>,
+        new_mode: Option<FileMode>,
+    ) -> Self {
+        Self {
+            operation,
+            kind: PatchKind::Binary(binary),
             old_mode,
             new_mode,
         }
@@ -197,14 +275,14 @@ impl<'a, T: ToOwned + ?Sized> FilePatch<'a, T> {
         &self.operation
     }
 
-    /// Returns the underlying patch.
-    pub fn patch(&self) -> &Patch<'a, T> {
-        &self.patch
+    /// Returns the patch content.
+    pub fn patch(&self) -> &PatchKind<'a, T> {
+        &self.kind
     }
 
-    /// Consumes the [`FilePatch`] and returns the underlying [`Patch`].
-    pub fn into_patch(self) -> Patch<'a, T> {
-        self.patch
+    /// Consumes the [`FilePatch`] and returns the underlying [`PatchKind`].
+    pub fn into_patch(self) -> PatchKind<'a, T> {
+        self.kind
     }
 
     /// Returns the file mode before applying this patch (when known).
