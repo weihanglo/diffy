@@ -720,7 +720,7 @@ KcmV+b0RR6000031
         assert_eq!(patches.len(), 1);
         assert!(matches!(
             patches[0].patch().as_binary().unwrap(),
-            BinaryPatch::Literal { .. }
+            BinaryPatch::Full { .. }
         ));
         assert_eq!(
             patches[0].operation(),

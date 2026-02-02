@@ -13,36 +13,53 @@ mod delta;
 use std::borrow::Cow;
 use std::fmt;
 
+/// The type of a binary patch block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinaryBlockKind {
+    /// [Literal](https://diffx.org/spec/binary-diffs.html#git-literal-binary-diffs):
+    /// contains the full file content, zlib-compressed and Base85-encoded.
+    Literal,
+    /// [Delta](https://diffx.org/spec/binary-diffs.html#git-delta-binary-diffs):
+    /// contains delta instructions to transform one file into another.
+    Delta,
+}
+
+/// A single block in a binary patch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BinaryBlock<'a> {
+    /// The type of this block (literal content or delta instructions).
+    pub kind: BinaryBlockKind,
+    /// The encoded data.
+    pub data: BinaryData<'a>,
+}
+
 /// A parsed binary patch.
 ///
 /// A binary patch contains encoded binary data that can be decoded
 /// to recover the original and modified file contents.
+///
+/// Git may use different encodings for each direction:
+///
+/// - `literal`: full file content
+/// - `delta`: instructions to transform one file into another
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BinaryPatch<'a> {
-    /// [Git Literal binary diffs](https://diffx.org/spec/binary-diffs.html#git-literal-binary-diffs)
-    /// contain the full contents of both the original and modified binary files,
-    /// zlib-compressed and encoded as Base85.
-    Literal {
-        /// Modified file content.
-        modified: BinaryData<'a>,
-        /// Original file content.
-        original: BinaryData<'a>,
-    },
-    /// [Git Delta binary diffs](https://diffx.org/spec/binary-diffs.html#git-delta-binary-diffs)
-    /// contain instructions on applying patches to binary files.
+    /// A full binary patch with forward and reverse data.
     ///
-    /// Unlike [`BinaryPatch::Literal`],
-    /// these do not require embedding the full content of the new file in the patch.
-    Delta {
-        /// Delta instructions: original -> modified.
-        forward: BinaryData<'a>,
-        /// Delta instructions: modified -> original.
-        reverse: BinaryData<'a>,
+    /// The forward block transforms original -> modified.
+    /// The reverse block transforms modified -> original.
+    ///
+    /// Each block can independently be either `literal` or `delta`.
+    Full {
+        /// Forward transformation (original -> modified).
+        forward: BinaryBlock<'a>,
+        /// Reverse transformation (modified -> original).
+        reverse: BinaryBlock<'a>,
     },
     /// A Git binary diff marker.
     ///
     /// This represents the `Binary files a/path and b/path differ` case,
-    /// where git detected a binary change but didn't include the actual data
+    /// where git detected a binary change but didn't include the actual data.
     ///
     /// Calling [`apply()`](Self::apply) on this variant returns an error.
     Marker,
@@ -51,45 +68,42 @@ pub enum BinaryPatch<'a> {
 impl<'a> BinaryPatch<'a> {
     /// Applies a binary patch forward: original -> modified.
     ///
-    /// For [`Literal`](BinaryPatch::Literal),
-    /// returns the embedded modified content.
-    /// Unlike `git apply`,
-    /// this doesn't check integrity of `original` but directly decodes and applies.
+    /// - If the forward block is `Literal`: returns the decoded content directly.
+    /// - If the forward block is `Delta`: applies delta instructions to `original`.
     ///
-    /// For [`Delta`](BinaryPatch::Literal),
-    /// applies forward delta instructions to `original`.
+    /// Unlike `git apply`, this doesn't validate the original content hash.
     #[cfg(feature = "binary")]
     pub fn apply(&self, original: &[u8]) -> Result<Vec<u8>, BinaryPatchParseError> {
         match self {
-            BinaryPatch::Literal { modified, .. } => Self::decode_data(modified),
-            BinaryPatch::Delta { forward, .. } => {
-                let delta_instructions = Self::decode_data(forward)?;
-                delta::apply(original, &delta_instructions)
-                    .map_err(|e| BinaryPatchParseError::new(e.to_string()))
-            }
+            BinaryPatch::Full { forward, .. } => Self::apply_block(forward, original),
             BinaryPatch::Marker => Err(BinaryPatchParseError::new("no binary data available")),
         }
     }
 
     /// Applies a binary patch in reverse: modified -> original.
     ///
-    /// For [`Literal`](BinaryPatch::Literal),
-    /// returns the embedded original content.
-    /// Unlike `git apply`,
-    /// this doesn't check integrity of `modified` but directly decodes and applies.
+    /// - If the reverse block is `Literal`: returns the decoded content directly.
+    /// - If the reverse block is `Delta`: applies delta instructions to `modified`.
     ///
-    /// For [`Delta`](BinaryPatch::Delta),
-    /// applies reverse delta instructions to `modified`.
+    /// Unlike `git apply`, this doesn't validate the modified content hash.
     #[cfg(feature = "binary")]
     pub fn apply_reverse(&self, modified: &[u8]) -> Result<Vec<u8>, BinaryPatchParseError> {
         match self {
-            BinaryPatch::Literal { original, .. } => Self::decode_data(original),
-            BinaryPatch::Delta { reverse, .. } => {
-                let delta_instructions = Self::decode_data(reverse)?;
-                delta::apply(modified, &delta_instructions)
+            BinaryPatch::Full { reverse, .. } => Self::apply_block(reverse, modified),
+            BinaryPatch::Marker => Err(BinaryPatchParseError::new("no binary data available")),
+        }
+    }
+
+    /// Applies a single block (either literal or delta).
+    #[cfg(feature = "binary")]
+    fn apply_block(block: &BinaryBlock<'_>, base: &[u8]) -> Result<Vec<u8>, BinaryPatchParseError> {
+        match block.kind {
+            BinaryBlockKind::Literal => Self::decode_data(&block.data),
+            BinaryBlockKind::Delta => {
+                let delta_instructions = Self::decode_data(&block.data)?;
+                delta::apply(base, &delta_instructions)
                     .map_err(|e| BinaryPatchParseError::new(e.to_string()))
             }
-            BinaryPatch::Marker => Err(BinaryPatchParseError::new("no binary data available")),
         }
     }
 
@@ -192,48 +206,33 @@ pub(crate) fn parse_binary_patch(input: &str) -> Result<BinaryPatch<'_>, BinaryP
     // Expect "GIT binary patch" marker
     assert_eq!(parser.next_line(), Some("GIT binary patch"));
 
-    // Parse first block (modified content or forward delta)
-    let Some((first_type, first_data)) = parse_binary_block(&mut parser) else {
+    // Parse first block (forward: original -> modified)
+    let Some(forward) = parse_binary_block(&mut parser) else {
         return Err(BinaryPatchParseError::new("first binary block not found"));
     };
 
-    // Parse second block (original content or reverse delta)
-    let Some((second_type, second_data)) = parse_binary_block(&mut parser) else {
+    // Parse second block (reverse: modified -> original)
+    let Some(reverse) = parse_binary_block(&mut parser) else {
         return Err(BinaryPatchParseError::new("second binary block not found"));
     };
 
-    let patch = match first_type {
-        "literal" => BinaryPatch::Literal {
-            modified: first_data,
-            original: second_data,
-        },
-        "delta" => BinaryPatch::Delta {
-            forward: first_data,
-            reverse: second_data,
-        },
-        _ => {
-            return Err(BinaryPatchParseError::new("unrecognized binary patch type"));
-        }
-    };
-
-    // Both blocks must have the same type
-    if first_type != second_type {
-        return Err(BinaryPatchParseError::new(
-            "binary data blocks must be the same",
-        ));
-    }
-
-    Ok(patch)
+    Ok(BinaryPatch::Full { forward, reverse })
 }
 
 /// Parses a single binary block.
 ///
-/// Returns `(patch_type, size, data)` where data is a slice of Base85 lines.
-fn parse_binary_block<'a>(parser: &mut BinaryParser<'a>) -> Option<(&'a str, BinaryData<'a>)> {
+/// Returns a `BinaryBlock` with kind (literal/delta) and data.
+fn parse_binary_block<'a>(parser: &mut BinaryParser<'a>) -> Option<BinaryBlock<'a>> {
     // Parse "literal 10" or "delta 18"
     let format_line = parser.next_line()?;
     let (patch_type, size_str) = format_line.split_once(' ')?;
     let size: u64 = size_str.parse().ok()?;
+
+    let kind = match patch_type {
+        "literal" => BinaryBlockKind::Literal,
+        "delta" => BinaryBlockKind::Delta,
+        _ => return None,
+    };
 
     // Record start of Base85 data
     let data_start = parser.offset;
@@ -249,8 +248,10 @@ fn parse_binary_block<'a>(parser: &mut BinaryParser<'a>) -> Option<(&'a str, Bin
 
     let data = parser.slice_from(data_start);
 
-    let data = BinaryData { size, data };
-    Some((patch_type, data))
+    Some(BinaryBlock {
+        kind,
+        data: BinaryData { size, data },
+    })
 }
 
 /// Decodes multi-line Base85 data with length indicators.
@@ -338,11 +339,13 @@ mod tests {
         let patch = parse_binary_patch(input).unwrap();
 
         match &patch {
-            BinaryPatch::Literal { modified, original } => {
-                assert_eq!(modified.size, 10);
-                assert_eq!(original.size, 0);
+            BinaryPatch::Full { forward, reverse } => {
+                assert_eq!(forward.kind, BinaryBlockKind::Literal);
+                assert_eq!(forward.data.size, 10);
+                assert_eq!(reverse.kind, BinaryBlockKind::Literal);
+                assert_eq!(reverse.data.size, 0);
             }
-            _ => panic!("expected Literal variant"),
+            _ => panic!("expected Full variant"),
         }
     }
 
@@ -352,11 +355,13 @@ mod tests {
         let patch = parse_binary_patch(input).unwrap();
 
         match &patch {
-            BinaryPatch::Delta { forward, reverse } => {
-                assert_eq!(forward.size, 18);
-                assert_eq!(reverse.size, 18);
+            BinaryPatch::Full { forward, reverse } => {
+                assert_eq!(forward.kind, BinaryBlockKind::Delta);
+                assert_eq!(forward.data.size, 18);
+                assert_eq!(reverse.kind, BinaryBlockKind::Delta);
+                assert_eq!(reverse.data.size, 18);
             }
-            _ => panic!("expected Delta variant"),
+            _ => panic!("expected Full variant"),
         }
     }
 
@@ -374,18 +379,29 @@ mod tests {
         let patch = parse_binary_patch(input).unwrap();
 
         match &patch {
-            BinaryPatch::Literal { modified, original } => {
-                assert_eq!(modified.size, 10);
-                assert_eq!(original.size, 0);
+            BinaryPatch::Full { forward, reverse } => {
+                assert_eq!(forward.kind, BinaryBlockKind::Literal);
+                assert_eq!(forward.data.size, 10);
+                assert_eq!(reverse.kind, BinaryBlockKind::Literal);
+                assert_eq!(reverse.data.size, 0);
             }
-            _ => panic!("expected Literal variant"),
+            _ => panic!("expected Full variant"),
         }
     }
 
     #[test]
-    fn parse_mixed_format_rejected() {
+    fn parse_mixed_format() {
+        // Git can use different encoding for each direction
         let input = "GIT binary patch\nliteral 10\nUcmV+l0QLU>0RjUA1qKHQ2>`DEE&u=k\n\ndelta 18\nccmV+t0PX*P2!IH%^Z^9`00000v-trB0x!=5aR2}S\n\n";
-        assert!(parse_binary_patch(input).is_err());
+        let patch = parse_binary_patch(input).unwrap();
+
+        match &patch {
+            BinaryPatch::Full { forward, reverse } => {
+                assert_eq!(forward.kind, BinaryBlockKind::Literal);
+                assert_eq!(reverse.kind, BinaryBlockKind::Delta);
+            }
+            _ => panic!("expected Full variant"),
+        }
     }
 }
 
