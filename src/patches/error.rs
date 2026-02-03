@@ -1,22 +1,80 @@
 //! Error types for patches parsing.
 
-use std::borrow::Cow;
 use std::fmt;
 
-/// An error returned when parsing patches fails.
-#[derive(Debug)]
-pub struct PatchSetParseError(Cow<'static, str>);
+use crate::binary::BinaryPatchParseError;
+use crate::patch::ParsePatchError;
 
-impl PatchSetParseError {
-    pub(crate) fn new<E: Into<Cow<'static, str>>>(e: E) -> Self {
-        Self(e.into())
-    }
+/// An error returned when parsing patches fails.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PatchSetParseError {
+    /// Single patch parsing failed.
+    Patch(ParsePatchError),
+
+    /// Binary patch parsing failed.
+    Binary(BinaryPatchParseError),
+
+    /// No valid patches found in input.
+    NoPatchesFound,
+
+    /// Binary diff not supported with current options.
+    BinaryNotSupported { path: String },
+
+    /// Invalid `diff --git` path.
+    InvalidDiffGitPath,
+
+    /// Invalid file mode.
+    InvalidFileMode(String),
+
+    /// Patch has no file path.
+    NoFilePath,
+
+    /// Patch has both original and modified as /dev/null.
+    BothDevNull,
+
+    /// Delete patch missing original path.
+    DeleteMissingOriginalPath,
+
+    /// Create patch missing modified path.
+    CreateMissingModifiedPath,
 }
 
 impl fmt::Display for PatchSetParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "error parsing patchset: {}", self.0)
+        let msg = match self {
+            Self::Patch(e) => return write!(f, "error parsing patchset: {e}"),
+            Self::Binary(e) => return write!(f, "error parsing patchset: {e}"),
+            Self::NoPatchesFound => "no valid patches found",
+            Self::BinaryNotSupported { path } => {
+                return write!(
+                    f,
+                    "error parsing patchset: binary diff not supported: {path}"
+                )
+            }
+            Self::InvalidDiffGitPath => "unable to parse `diff --git` path",
+            Self::InvalidFileMode(mode) => {
+                return write!(f, "error parsing patchset: invalid file mode: {mode}")
+            }
+            Self::NoFilePath => "patch has no file path",
+            Self::BothDevNull => "patch has both original and modified as /dev/null",
+            Self::DeleteMissingOriginalPath => "delete patch has no original path",
+            Self::CreateMissingModifiedPath => "create patch has no modified path",
+        };
+        write!(f, "error parsing patchset: {msg}")
     }
 }
 
 impl std::error::Error for PatchSetParseError {}
+
+impl From<ParsePatchError> for PatchSetParseError {
+    fn from(e: ParsePatchError) -> Self {
+        Self::Patch(e)
+    }
+}
+
+impl From<BinaryPatchParseError> for PatchSetParseError {
+    fn from(e: BinaryPatchParseError) -> Self {
+        Self::Binary(e)
+    }
+}

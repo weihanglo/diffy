@@ -168,9 +168,7 @@ impl std::str::FromStr for FileMode {
             "100755" => Ok(Self::Executable),
             "120000" => Ok(Self::Symlink),
             "160000" => Ok(Self::Gitlink),
-            _ => Err(PatchSetParseError::new(format!(
-                "invalid file mode: {mode}"
-            ))),
+            _ => Err(PatchSetParseError::InvalidFileMode(mode.to_owned())),
         }
     }
 }

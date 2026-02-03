@@ -153,10 +153,8 @@ impl<'a> Patches<'a> {
                     return self.next_gitdiff_patch();
                 }
                 Binary::Fail => {
-                    let path = header.diff_git_line.unwrap_or("<unknown>");
-                    return Some(Err(PatchSetParseError::new(format!(
-                        "binary diff not supported: {path}"
-                    ))));
+                    let path = header.diff_git_line.unwrap_or("<unknown>").to_owned();
+                    return Some(Err(PatchSetParseError::BinaryNotSupported { path }));
                 }
                 Binary::Keep => {
                     let operation = match extract_file_op_binary(&header) {
@@ -185,17 +183,15 @@ impl<'a> Patches<'a> {
                     return self.next_gitdiff_patch();
                 }
                 Binary::Fail => {
-                    let path = header.diff_git_line.unwrap_or("<unknown>");
-                    return Some(Err(PatchSetParseError::new(format!(
-                        "binary diff not supported: {path}"
-                    ))));
+                    let path = header.diff_git_line.unwrap_or("<unknown>").to_owned();
+                    return Some(Err(PatchSetParseError::BinaryNotSupported { path }));
                 }
                 Binary::Keep => {
                     // Find "GIT binary patch" in header and parse from there
                     let binary_start = git_diff.header.find("GIT binary patch").unwrap_or(0);
                     let binary_patch = match parse_binary_patch(&git_diff.header[binary_start..]) {
                         Ok(bp) => bp,
-                        Err(e) => return Some(Err(PatchSetParseError::new(e.to_string()))),
+                        Err(e) => return Some(Err(e.into())),
                     };
                     let operation = match extract_file_op_binary(&header) {
                         Ok(op) => op,
@@ -222,7 +218,7 @@ impl<'a> Patches<'a> {
         } else {
             match parse_one(git_diff.patch) {
                 Ok((patch, _consumed)) => patch,
-                Err(e) => return Some(Err(PatchSetParseError::new(e.to_string()))),
+                Err(e) => return Some(Err(e.into())),
             }
         };
 
@@ -301,7 +297,7 @@ impl<'a> Patches<'a> {
 
         let patch = match parse_one(patch_content) {
             Ok((patch, _consumed)) => patch,
-            Err(e) => return Some(Err(PatchSetParseError::new(e.to_string()))),
+            Err(e) => return Some(Err(e.into())),
         };
 
         let operation = match extract_file_op_unidiff(patch.original_path(), patch.modified_path())
@@ -331,7 +327,7 @@ impl<'a> Iterator for Patches<'a> {
                 if result.is_none() {
                     self.finished = true;
                     if !self.found_any {
-                        return Some(Err(PatchSetParseError::new("no valid patches found")));
+                        return Some(Err(PatchSetParseError::NoPatchesFound));
                     }
                 }
                 result
@@ -341,7 +337,7 @@ impl<'a> Iterator for Patches<'a> {
                 if result.is_none() {
                     self.finished = true;
                     if !self.found_any {
-                        return Some(Err(PatchSetParseError::new("no valid patches found")));
+                        return Some(Err(PatchSetParseError::NoPatchesFound));
                     }
                 }
                 result
@@ -437,18 +433,14 @@ pub fn extract_file_op_unidiff<'a>(
     let is_delete = modified.as_deref() == Some(DEV_NULL);
 
     if is_create && is_delete {
-        return Err(PatchSetParseError::new(
-            "patch has both original and modified as /dev/null",
-        ));
+        return Err(PatchSetParseError::BothDevNull);
     }
 
     if is_delete {
-        let path =
-            original.ok_or_else(|| PatchSetParseError::new("delete patch has no original path"))?;
+        let path = original.ok_or(PatchSetParseError::DeleteMissingOriginalPath)?;
         Ok(FileOperation::Delete(path))
     } else if is_create {
-        let path =
-            modified.ok_or_else(|| PatchSetParseError::new("create patch has no modified path"))?;
+        let path = modified.ok_or(PatchSetParseError::CreateMissingModifiedPath)?;
         Ok(FileOperation::Create(path))
     } else {
         match (original, modified) {
@@ -468,7 +460,7 @@ pub fn extract_file_op_unidiff<'a>(
                     original,
                 })
             }
-            (None, None) => Err(PatchSetParseError::new("patch has no file path")),
+            (None, None) => Err(PatchSetParseError::NoFilePath),
         }
     }
 }
@@ -494,7 +486,7 @@ fn extract_file_op_binary<'a>(
 
     // Use `diff --git <old> <new>` for binary patches.
     let Some((original, modified)) = header.diff_git_line.and_then(parse_diff_git_path) else {
-        return Err(PatchSetParseError::new("unable to parse `diff --git` path"));
+        return Err(PatchSetParseError::InvalidDiffGitPath);
     };
 
     let op = if header.new_file_mode.is_some() {
@@ -550,7 +542,7 @@ fn extract_file_op_gitdiff<'a>(
 
     // Fall back to `diff --git <old> <new>` for mode-only and empty file changes.
     let Some((original, modified)) = header.diff_git_line.and_then(parse_diff_git_path) else {
-        return Err(PatchSetParseError::new("unable to parse `diff --git` path"));
+        return Err(PatchSetParseError::InvalidDiffGitPath);
     };
 
     let op = if header.new_file_mode.is_some() {
