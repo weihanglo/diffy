@@ -252,7 +252,7 @@ pub(crate) fn escaped_filename<T: Text + ToOwned + ?Sized>(
         // No need to escape
         let bytes = filename.as_bytes();
         if bytes.iter().any(|b| ESCAPED_CHARS_BYTES.contains(b)) {
-            return Err(ParsePatchError::new("invalid char in unquoted filename"));
+            return Err(ParsePatchError::InvalidCharInUnquotedFilename);
         }
         Ok(bytes.into())
     }
@@ -274,7 +274,7 @@ fn _escaped_filename<T: Text + ToOwned + ?Sized>(
 
             i += 1;
             if i >= bytes.len() {
-                return Err(ParsePatchError::new("expected escaped character"));
+                return Err(ParsePatchError::ExpectedEscapedChar);
             }
 
             let decoded = match bytes[i] {
@@ -284,13 +284,13 @@ fn _escaped_filename<T: Text + ToOwned + ?Sized>(
                 b'r' => b'\r',
                 b'\"' => b'\"',
                 b'\\' => b'\\',
-                _ => return Err(ParsePatchError::new("invalid escaped character")),
+                _ => return Err(ParsePatchError::InvalidEscapedChar),
             };
             result.push(decoded);
             i += 1;
             last_copy = i;
         } else if ESCAPED_CHARS_BYTES.contains(&bytes[i]) {
-            return Err(ParsePatchError::new("invalid unescaped character"));
+            return Err(ParsePatchError::InvalidUnescapedChar);
         } else {
             i += 1;
         }

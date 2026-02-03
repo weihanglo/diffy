@@ -1,3 +1,4 @@
+mod error;
 mod format;
 pub(crate) mod parse;
 #[cfg(feature = "color")]
@@ -7,8 +8,8 @@ use std::borrow::Cow;
 use std::fmt;
 use std::ops;
 
+pub use error::ParsePatchError;
 pub use format::PatchFormatter;
-pub use parse::ParsePatchError;
 
 use crate::utils::ESCAPED_CHARS;
 use crate::utils::ESCAPED_CHARS_BYTES;

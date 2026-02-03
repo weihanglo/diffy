@@ -13,8 +13,8 @@ use diffy::binary::BinaryPatchParseError;
 use diffy::patches::FileOperation;
 use diffy::patches::ParseOptions;
 use diffy::patches::PatchKind;
-use diffy::patches::PatchSetParseError;
 use diffy::patches::Patches;
+use diffy::patches::PatchesParseError;
 
 /// Which external tool to compare against.
 #[derive(Clone, Copy)]
@@ -269,7 +269,7 @@ fn print_patch_version() {
 /// Error type for compat tests.
 #[derive(Debug)]
 pub enum TestError {
-    Parse(PatchSetParseError),
+    Parse(PatchesParseError),
     Apply(diffy::ApplyError),
     Binary(BinaryPatchParseError),
 }

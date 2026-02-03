@@ -3,16 +3,18 @@
 //! This module provides [`Patches`] for parsing patches that contain changes
 //! to multiple files, like the output of `git diff` or `git format-patch`.
 
+mod error;
 mod parse;
-pub use parse::Patches;
 #[cfg(test)]
 mod tests;
 
 use std::borrow::Cow;
-use std::fmt;
 
 use crate::binary::BinaryPatch;
 use crate::Patch;
+
+pub use error::PatchesParseError;
+pub use parse::Patches;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) enum Format {
@@ -158,7 +160,7 @@ pub enum FileMode {
 }
 
 impl std::str::FromStr for FileMode {
-    type Err = PatchSetParseError;
+    type Err = PatchesParseError;
 
     fn from_str(mode: &str) -> Result<Self, Self::Err> {
         match mode {
@@ -166,9 +168,7 @@ impl std::str::FromStr for FileMode {
             "100755" => Ok(Self::Executable),
             "120000" => Ok(Self::Symlink),
             "160000" => Ok(Self::Gitlink),
-            _ => Err(PatchSetParseError::new(format!(
-                "invalid file mode: {mode}"
-            ))),
+            _ => Err(PatchesParseError::InvalidFileMode(mode.to_owned())),
         }
     }
 }
@@ -402,21 +402,3 @@ impl FileOperation<'_> {
         matches!(self, FileOperation::Copy { .. })
     }
 }
-
-/// An error returned when parsing patches fails.
-#[derive(Debug)]
-pub struct PatchSetParseError(Cow<'static, str>);
-
-impl PatchSetParseError {
-    pub(crate) fn new<E: Into<Cow<'static, str>>>(e: E) -> Self {
-        Self(e.into())
-    }
-}
-
-impl fmt::Display for PatchSetParseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "error parsing patchset: {}", self.0)
-    }
-}
-
-impl std::error::Error for PatchSetParseError {}

@@ -8,7 +8,7 @@ use super::FileOperation;
 use super::FilePatch;
 use super::Format;
 use super::ParseOptions;
-use super::PatchSetParseError;
+use super::PatchesParseError;
 use crate::binary::parse_binary_patch;
 use crate::patch::parse::parse_one;
 use crate::utils::escaped_filename;
@@ -127,7 +127,7 @@ impl<'a> Patches<'a> {
         None
     }
 
-    fn next_gitdiff_patch(&mut self) -> Option<Result<FilePatch<'a, str>, PatchSetParseError>> {
+    fn next_gitdiff_patch(&mut self) -> Option<Result<FilePatch<'a, str>, PatchesParseError>> {
         // Find next patch start
         let patch_start = self.find_next_gitdiff_start()?;
 
@@ -153,10 +153,8 @@ impl<'a> Patches<'a> {
                     return self.next_gitdiff_patch();
                 }
                 Binary::Fail => {
-                    let path = header.diff_git_line.unwrap_or("<unknown>");
-                    return Some(Err(PatchSetParseError::new(format!(
-                        "binary diff not supported: {path}"
-                    ))));
+                    let path = header.diff_git_line.unwrap_or("<unknown>").to_owned();
+                    return Some(Err(PatchesParseError::BinaryNotSupported { path }));
                 }
                 Binary::Keep => {
                     let operation = match extract_file_op_binary(&header) {
@@ -185,17 +183,15 @@ impl<'a> Patches<'a> {
                     return self.next_gitdiff_patch();
                 }
                 Binary::Fail => {
-                    let path = header.diff_git_line.unwrap_or("<unknown>");
-                    return Some(Err(PatchSetParseError::new(format!(
-                        "binary diff not supported: {path}"
-                    ))));
+                    let path = header.diff_git_line.unwrap_or("<unknown>").to_owned();
+                    return Some(Err(PatchesParseError::BinaryNotSupported { path }));
                 }
                 Binary::Keep => {
                     // Find "GIT binary patch" in header and parse from there
                     let binary_start = git_diff.header.find("GIT binary patch").unwrap_or(0);
                     let binary_patch = match parse_binary_patch(&git_diff.header[binary_start..]) {
                         Ok(bp) => bp,
-                        Err(e) => return Some(Err(PatchSetParseError::new(e.to_string()))),
+                        Err(e) => return Some(Err(e.into())),
                     };
                     let operation = match extract_file_op_binary(&header) {
                         Ok(op) => op,
@@ -222,7 +218,7 @@ impl<'a> Patches<'a> {
         } else {
             match parse_one(git_diff.patch) {
                 Ok((patch, _consumed)) => patch,
-                Err(e) => return Some(Err(PatchSetParseError::new(e.to_string()))),
+                Err(e) => return Some(Err(e.into())),
             }
         };
 
@@ -258,7 +254,7 @@ impl<'a> Patches<'a> {
         Some(Ok(FilePatch::new(operation, patch, old_mode, new_mode)))
     }
 
-    fn next_unidiff_patch(&mut self) -> Option<Result<FilePatch<'a, str>, PatchSetParseError>> {
+    fn next_unidiff_patch(&mut self) -> Option<Result<FilePatch<'a, str>, PatchesParseError>> {
         let remaining = &self.input[self.offset..];
         if remaining.is_empty() {
             return None;
@@ -301,7 +297,7 @@ impl<'a> Patches<'a> {
 
         let patch = match parse_one(patch_content) {
             Ok((patch, _consumed)) => patch,
-            Err(e) => return Some(Err(PatchSetParseError::new(e.to_string()))),
+            Err(e) => return Some(Err(e.into())),
         };
 
         let operation = match extract_file_op_unidiff(patch.original_path(), patch.modified_path())
@@ -318,7 +314,7 @@ impl<'a> Patches<'a> {
 }
 
 impl<'a> Iterator for Patches<'a> {
-    type Item = Result<FilePatch<'a, str>, PatchSetParseError>;
+    type Item = Result<FilePatch<'a, str>, PatchesParseError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.finished {
@@ -331,7 +327,7 @@ impl<'a> Iterator for Patches<'a> {
                 if result.is_none() {
                     self.finished = true;
                     if !self.found_any {
-                        return Some(Err(PatchSetParseError::new("no valid patches found")));
+                        return Some(Err(PatchesParseError::NoPatchesFound));
                     }
                 }
                 result
@@ -341,7 +337,7 @@ impl<'a> Iterator for Patches<'a> {
                 if result.is_none() {
                     self.finished = true;
                     if !self.found_any {
-                        return Some(Err(PatchSetParseError::new("no valid patches found")));
+                        return Some(Err(PatchesParseError::NoPatchesFound));
                     }
                 }
                 result
@@ -432,23 +428,19 @@ fn strip_email_preamble(input: &str) -> &str {
 pub fn extract_file_op_unidiff<'a>(
     original: Option<Cow<'a, str>>,
     modified: Option<Cow<'a, str>>,
-) -> Result<FileOperation<'a>, PatchSetParseError> {
+) -> Result<FileOperation<'a>, PatchesParseError> {
     let is_create = original.as_deref() == Some(DEV_NULL);
     let is_delete = modified.as_deref() == Some(DEV_NULL);
 
     if is_create && is_delete {
-        return Err(PatchSetParseError::new(
-            "patch has both original and modified as /dev/null",
-        ));
+        return Err(PatchesParseError::BothDevNull);
     }
 
     if is_delete {
-        let path =
-            original.ok_or_else(|| PatchSetParseError::new("delete patch has no original path"))?;
+        let path = original.ok_or(PatchesParseError::DeleteMissingOriginalPath)?;
         Ok(FileOperation::Delete(path))
     } else if is_create {
-        let path =
-            modified.ok_or_else(|| PatchSetParseError::new("create patch has no modified path"))?;
+        let path = modified.ok_or(PatchesParseError::CreateMissingModifiedPath)?;
         Ok(FileOperation::Create(path))
     } else {
         match (original, modified) {
@@ -468,7 +460,7 @@ pub fn extract_file_op_unidiff<'a>(
                     original,
                 })
             }
-            (None, None) => Err(PatchSetParseError::new("patch has no file path")),
+            (None, None) => Err(PatchesParseError::NoFilePath),
         }
     }
 }
@@ -477,7 +469,7 @@ pub fn extract_file_op_unidiff<'a>(
 /// Extracts file operation for binary patches (no ---/+++ headers).
 fn extract_file_op_binary<'a>(
     header: &GitHeader<'a>,
-) -> Result<FileOperation<'a>, PatchSetParseError> {
+) -> Result<FileOperation<'a>, PatchesParseError> {
     // Git headers are authoritative for rename/copy
     if let (Some(from), Some(to)) = (header.rename_from, header.rename_to) {
         return Ok(FileOperation::Rename {
@@ -494,7 +486,7 @@ fn extract_file_op_binary<'a>(
 
     // Use `diff --git <old> <new>` for binary patches.
     let Some((original, modified)) = header.diff_git_line.and_then(parse_diff_git_path) else {
-        return Err(PatchSetParseError::new("unable to parse `diff --git` path"));
+        return Err(PatchesParseError::InvalidDiffGitPath);
     };
 
     let op = if header.new_file_mode.is_some() {
@@ -511,7 +503,7 @@ fn extract_file_op_binary<'a>(
 /// Parses file modes from git extended headers.
 fn parse_file_modes(
     header: &GitHeader<'_>,
-) -> Result<(Option<FileMode>, Option<FileMode>), PatchSetParseError> {
+) -> Result<(Option<FileMode>, Option<FileMode>), PatchesParseError> {
     let old_mode = header
         .old_mode
         .or(header.deleted_file_mode)
@@ -528,7 +520,7 @@ fn parse_file_modes(
 fn extract_file_op_gitdiff<'a>(
     header: &GitHeader<'a>,
     patch: &Patch<'a, str>,
-) -> Result<FileOperation<'a>, PatchSetParseError> {
+) -> Result<FileOperation<'a>, PatchesParseError> {
     // Git headers are authoritative for rename/copy
     if let (Some(from), Some(to)) = (header.rename_from, header.rename_to) {
         return Ok(FileOperation::Rename {
@@ -550,7 +542,7 @@ fn extract_file_op_gitdiff<'a>(
 
     // Fall back to `diff --git <old> <new>` for mode-only and empty file changes.
     let Some((original, modified)) = header.diff_git_line.and_then(parse_diff_git_path) else {
-        return Err(PatchSetParseError::new("unable to parse `diff --git` path"));
+        return Err(PatchesParseError::InvalidDiffGitPath);
     };
 
     let op = if header.new_file_mode.is_some() {

@@ -1,8 +1,8 @@
 //! Parse a Patch
 
 use std::borrow::Cow;
-use std::fmt;
 
+use super::error::ParsePatchError;
 use super::Hunk;
 use super::HunkRange;
 use super::Line;
@@ -13,27 +13,6 @@ use crate::utils::LineIter;
 use crate::utils::Text;
 
 type Result<T, E = ParsePatchError> = std::result::Result<T, E>;
-
-/// An error returned when parsing a `Patch` using [`Patch::from_str`] fails
-///
-/// [`Patch::from_str`]: struct.Patch.html#method.from_str
-// TODO use a custom error type instead of a Cow
-#[derive(Debug)]
-pub struct ParsePatchError(Cow<'static, str>);
-
-impl ParsePatchError {
-    pub(crate) fn new<E: Into<Cow<'static, str>>>(e: E) -> Self {
-        Self(e.into())
-    }
-}
-
-impl fmt::Display for ParsePatchError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "error parsing patch: {}", self.0)
-    }
-}
-
-impl std::error::Error for ParsePatchError {}
 
 struct Parser<'a, T: Text + ?Sized> {
     lines: std::iter::Peekable<LineIter<'a, T>>,
@@ -53,10 +32,7 @@ impl<'a, T: Text + ?Sized> Parser<'a, T> {
     }
 
     fn next(&mut self) -> Result<&'a T> {
-        let line = self
-            .lines
-            .next()
-            .ok_or_else(|| ParsePatchError::new("unexpected EOF"))?;
+        let line = self.lines.next().ok_or(ParsePatchError::UnexpectedEof)?;
         self.offset += line.len();
         Ok(line)
     }
@@ -113,12 +89,12 @@ fn patch_header<'a, T: Text + ToOwned + ?Sized>(
     while let Some(line) = parser.peek() {
         if line.starts_with("--- ") {
             if filename1.is_some() {
-                return Err(ParsePatchError::new("multiple '---' lines"));
+                return Err(ParsePatchError::MultipleOriginalHeaders);
             }
             filename1 = Some(parse_filename("--- ", parser.next()?)?);
         } else if line.starts_with("+++ ") {
             if filename2.is_some() {
-                return Err(ParsePatchError::new("multiple '+++' lines"));
+                return Err(ParsePatchError::MultipleModifiedHeaders);
             }
             filename2 = Some(parse_filename("+++ ", parser.next()?)?);
         } else {
@@ -148,14 +124,14 @@ fn parse_filename<'a, T: Text + ToOwned + ?Sized>(
 ) -> Result<Cow<'a, [u8]>> {
     let line = line
         .strip_prefix(prefix)
-        .ok_or_else(|| ParsePatchError::new("unable to parse filename"))?;
+        .ok_or(ParsePatchError::InvalidFilename)?;
 
     let filename = if let Some((filename, _)) = line.split_at_exclusive("\t") {
         filename
     } else if let Some((filename, _)) = line.split_at_exclusive("\n") {
         filename
     } else {
-        return Err(ParsePatchError::new("filename unterminated"));
+        return Err(ParsePatchError::FilenameUnterminated);
     };
 
     let filename = escaped_filename(filename)?;
@@ -188,7 +164,7 @@ fn hunks<'a, T: Text + ?Sized>(parser: &mut Parser<'a, T>) -> Result<Vec<Hunk<'a
 
     // check and verify that the Hunks are in sorted order and don't overlap
     if !verify_hunks_in_order(&hunks) {
-        return Err(ParsePatchError::new("Hunks not in order or overlap"));
+        return Err(ParsePatchError::HunksOutOfOrder);
     }
 
     Ok(hunks)
@@ -204,25 +180,25 @@ fn hunk<'a, T: Text + ?Sized>(parser: &mut Parser<'a, T>) -> Result<Hunk<'a, T>>
 fn hunk_header<T: Text + ?Sized>(input: &T) -> Result<(HunkRange, HunkRange, Option<&T>)> {
     let input = input
         .strip_prefix("@@ ")
-        .ok_or_else(|| ParsePatchError::new("unable to parse hunk header"))?;
+        .ok_or(ParsePatchError::InvalidHunkHeader)?;
 
     let (ranges, function_context) = input
         .split_at_exclusive(" @@")
-        .ok_or_else(|| ParsePatchError::new("hunk header unterminated"))?;
+        .ok_or(ParsePatchError::HunkHeaderUnterminated)?;
     let function_context = function_context.strip_prefix(" ");
 
     let (range1, range2) = ranges
         .split_at_exclusive(" ")
-        .ok_or_else(|| ParsePatchError::new("unable to parse hunk header"))?;
+        .ok_or(ParsePatchError::InvalidHunkHeader)?;
     let range1 = range(
         range1
             .strip_prefix("-")
-            .ok_or_else(|| ParsePatchError::new("unable to parse hunk header"))?,
+            .ok_or(ParsePatchError::InvalidHunkHeader)?,
     )?;
     let range2 = range(
         range2
             .strip_prefix("+")
-            .ok_or_else(|| ParsePatchError::new("unable to parse hunk header"))?,
+            .ok_or(ParsePatchError::InvalidHunkHeader)?,
     )?;
     Ok((range1, range2, function_context))
 }
@@ -230,18 +206,11 @@ fn hunk_header<T: Text + ?Sized>(input: &T) -> Result<(HunkRange, HunkRange, Opt
 fn range<T: Text + ?Sized>(s: &T) -> Result<HunkRange> {
     let (start, len) = if let Some((start, len)) = s.split_at_exclusive(",") {
         (
-            start
-                .parse()
-                .ok_or_else(|| ParsePatchError::new("can't parse range"))?,
-            len.parse()
-                .ok_or_else(|| ParsePatchError::new("can't parse range"))?,
+            start.parse().ok_or(ParsePatchError::InvalidRange)?,
+            len.parse().ok_or(ParsePatchError::InvalidRange)?,
         )
     } else {
-        (
-            s.parse()
-                .ok_or_else(|| ParsePatchError::new("can't parse range"))?,
-            1,
-        )
+        (s.parse().ok_or(ParsePatchError::InvalidRange)?, 1)
     };
 
     Ok(HunkRange::new(start, len))
@@ -274,7 +243,7 @@ fn hunk_lines<'a, T: Text + ?Sized>(
             if hunk_complete {
                 break;
             }
-            return Err(ParsePatchError::new("expected end of hunk"));
+            return Err(ParsePatchError::ExpectedEndOfHunk);
         } else if let Some(line) = line.strip_prefix(" ") {
             if hunk_complete {
                 break;
@@ -287,7 +256,7 @@ fn hunk_lines<'a, T: Text + ?Sized>(
             Line::Context(*line)
         } else if let Some(line) = line.strip_prefix("-") {
             if no_newline_delete {
-                return Err(ParsePatchError::new("expected no more deleted lines"));
+                return Err(ParsePatchError::TooManyDeletedLines);
             }
             if hunk_complete {
                 break;
@@ -295,7 +264,7 @@ fn hunk_lines<'a, T: Text + ?Sized>(
             Line::Delete(line)
         } else if let Some(line) = line.strip_prefix("+") {
             if no_newline_insert {
-                return Err(ParsePatchError::new("expected no more inserted lines"));
+                return Err(ParsePatchError::TooManyInsertedLines);
             }
             if hunk_complete {
                 break;
@@ -309,9 +278,9 @@ fn hunk_lines<'a, T: Text + ?Sized>(
             //
             // * strip the newline character of the previous line
             // * don't increment line counts and continue to next directly
-            let last_line = lines.pop().ok_or_else(|| {
-                ParsePatchError::new("unexpected 'No newline at end of file' line")
-            })?;
+            let last_line = lines
+                .pop()
+                .ok_or(ParsePatchError::UnexpectedNoNewlineMarker)?;
             let modified = match last_line {
                 Line::Context(line) => {
                     no_newline_context = true;
@@ -335,7 +304,7 @@ fn hunk_lines<'a, T: Text + ?Sized>(
                 // Hunk is complete, treat remaining content as garbage
                 break;
             } else {
-                return Err(ParsePatchError::new("unexpected line in hunk body"));
+                return Err(ParsePatchError::UnexpectedHunkLine);
             }
         };
 
@@ -358,7 +327,7 @@ fn hunk_lines<'a, T: Text + ?Sized>(
 
     // Final check: ensure we got the expected number of lines
     if old_count != expected_old || new_count != expected_new {
-        return Err(ParsePatchError::new("Hunk header does not match hunk"));
+        return Err(ParsePatchError::HunkMismatch);
     }
 
     Ok(lines)
@@ -368,7 +337,7 @@ fn strip_newline<T: Text + ?Sized>(s: &T) -> Result<&T> {
     if let Some(stripped) = s.strip_suffix("\n") {
         Ok(stripped)
     } else {
-        Err(ParsePatchError::new("missing newline"))
+        Err(ParsePatchError::MissingNewline)
     }
 }
 
@@ -406,7 +375,10 @@ that should be ignored
 garbage before hunk complete
  line 3
 ";
-        assert!(parse(s).is_err());
+        assert_eq!(
+            parse(s).unwrap_err(),
+            super::ParsePatchError::UnexpectedHunkLine
+        );
     }
 
     #[test]
