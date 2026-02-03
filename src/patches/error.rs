@@ -8,7 +8,7 @@ use crate::patch::ParsePatchError;
 /// An error returned when parsing patches fails.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum PatchSetParseError {
+pub enum PatchesParseError {
     /// Single patch parsing failed.
     Patch(ParsePatchError),
 
@@ -40,7 +40,7 @@ pub enum PatchSetParseError {
     CreateMissingModifiedPath,
 }
 
-impl fmt::Display for PatchSetParseError {
+impl fmt::Display for PatchesParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let msg = match self {
             Self::Patch(e) => return write!(f, "error parsing patchset: {e}"),
@@ -65,15 +65,15 @@ impl fmt::Display for PatchSetParseError {
     }
 }
 
-impl std::error::Error for PatchSetParseError {}
+impl std::error::Error for PatchesParseError {}
 
-impl From<ParsePatchError> for PatchSetParseError {
+impl From<ParsePatchError> for PatchesParseError {
     fn from(e: ParsePatchError) -> Self {
         Self::Patch(e)
     }
 }
 
-impl From<BinaryPatchParseError> for PatchSetParseError {
+impl From<BinaryPatchParseError> for PatchesParseError {
     fn from(e: BinaryPatchParseError) -> Self {
         Self::Binary(e)
     }

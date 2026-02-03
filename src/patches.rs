@@ -13,7 +13,7 @@ use std::borrow::Cow;
 use crate::binary::BinaryPatch;
 use crate::Patch;
 
-pub use error::PatchSetParseError;
+pub use error::PatchesParseError;
 pub use parse::Patches;
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -160,7 +160,7 @@ pub enum FileMode {
 }
 
 impl std::str::FromStr for FileMode {
-    type Err = PatchSetParseError;
+    type Err = PatchesParseError;
 
     fn from_str(mode: &str) -> Result<Self, Self::Err> {
         match mode {
@@ -168,7 +168,7 @@ impl std::str::FromStr for FileMode {
             "100755" => Ok(Self::Executable),
             "120000" => Ok(Self::Symlink),
             "160000" => Ok(Self::Gitlink),
-            _ => Err(PatchSetParseError::InvalidFileMode(mode.to_owned())),
+            _ => Err(PatchesParseError::InvalidFileMode(mode.to_owned())),
         }
     }
 }

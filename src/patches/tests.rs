@@ -3,8 +3,8 @@
 use super::FileMode;
 use super::FileOperation;
 use super::ParseOptions;
-use super::PatchSetParseError;
 use super::Patches;
+use super::PatchesParseError;
 
 mod file_operation {
     use super::*;
@@ -611,7 +611,7 @@ old mode 100644
 new mode 100755
 ";
         let result: Result<Vec<_>, _> = Patches::parse(content, ParseOptions::gitdiff()).collect();
-        assert_eq!(result.unwrap_err(), PatchSetParseError::InvalidDiffGitPath);
+        assert_eq!(result.unwrap_err(), PatchesParseError::InvalidDiffGitPath);
     }
 
     #[test]
@@ -623,7 +623,7 @@ old mode 100644
 new mode 100755
 ";
         let result: Result<Vec<_>, _> = Patches::parse(content, ParseOptions::gitdiff()).collect();
-        assert_eq!(result.unwrap_err(), PatchSetParseError::InvalidDiffGitPath);
+        assert_eq!(result.unwrap_err(), PatchesParseError::InvalidDiffGitPath);
     }
 
     #[test]
@@ -829,7 +829,7 @@ Binary files a/image.png and b/image.png differ
 
         assert!(matches!(
             result.unwrap_err(),
-            PatchSetParseError::BinaryNotSupported { .. }
+            PatchesParseError::BinaryNotSupported { .. }
         ));
     }
 
@@ -851,7 +851,7 @@ Binary files a/binary.bin and b/binary.bin differ
 
         assert!(matches!(
             result.unwrap_err(),
-            PatchSetParseError::BinaryNotSupported { .. }
+            PatchesParseError::BinaryNotSupported { .. }
         ));
     }
 
@@ -1250,7 +1250,7 @@ No patches here
 +new
 ";
         let result: Result<Vec<_>, _> = Patches::parse(content, ParseOptions::unidiff()).collect();
-        assert_eq!(result.unwrap_err(), PatchSetParseError::BothDevNull);
+        assert_eq!(result.unwrap_err(), PatchesParseError::BothDevNull);
     }
 
     #[test]
