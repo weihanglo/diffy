@@ -375,7 +375,10 @@ that should be ignored
 garbage before hunk complete
  line 3
 ";
-        assert!(parse(s).is_err());
+        assert_eq!(
+            parse(s).unwrap_err(),
+            super::ParsePatchError::UnexpectedHunkLine
+        );
     }
 
     #[test]
