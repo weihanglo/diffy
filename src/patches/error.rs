@@ -1,14 +1,59 @@
 //! Error types for patches parsing.
 
 use std::fmt;
+use std::ops::Range;
 
 use crate::binary::BinaryPatchParseError;
 use crate::patch::ParsePatchError;
 
 /// An error returned when parsing patches fails.
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PatchesParseError {
+    pub(crate) kind: PatchesParseErrorKind,
+    span: Option<Range<usize>>,
+}
+
+impl PatchesParseError {
+    /// Creates a new error with the given kind and span.
+    pub(crate) fn new(kind: PatchesParseErrorKind, span: Range<usize>) -> Self {
+        Self {
+            kind,
+            span: Some(span),
+        }
+    }
+
+    /// Returns the byte range in the input where the error occurred.
+    pub fn span(&self) -> Option<Range<usize>> {
+        self.span.clone()
+    }
+}
+
+impl fmt::Display for PatchesParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(span) = &self.span {
+            write!(
+                f,
+                "error parsing patchset at byte {}: {}",
+                span.start, self.kind
+            )
+        } else {
+            write!(f, "error parsing patchset: {}", self.kind)
+        }
+    }
+}
+
+impl std::error::Error for PatchesParseError {}
+
+impl From<PatchesParseErrorKind> for PatchesParseError {
+    fn from(kind: PatchesParseErrorKind) -> Self {
+        Self { kind, span: None }
+    }
+}
+
+/// The kind of error that occurred when parsing patches.
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum PatchesParseError {
+pub(crate) enum PatchesParseErrorKind {
     /// Single patch parsing failed.
     Patch(ParsePatchError),
 
@@ -40,41 +85,33 @@ pub enum PatchesParseError {
     CreateMissingModifiedPath,
 }
 
-impl fmt::Display for PatchesParseError {
+impl fmt::Display for PatchesParseErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let msg = match self {
-            Self::Patch(e) => return write!(f, "error parsing patchset: {e}"),
-            Self::Binary(e) => return write!(f, "error parsing patchset: {e}"),
-            Self::NoPatchesFound => "no valid patches found",
+        match self {
+            Self::Patch(e) => write!(f, "{e}"),
+            Self::Binary(e) => write!(f, "{e}"),
+            Self::NoPatchesFound => write!(f, "no valid patches found"),
             Self::BinaryNotSupported { path } => {
-                return write!(
-                    f,
-                    "error parsing patchset: binary diff not supported: {path}"
-                )
+                write!(f, "binary diff not supported: {path}")
             }
-            Self::InvalidDiffGitPath => "unable to parse `diff --git` path",
-            Self::InvalidFileMode(mode) => {
-                return write!(f, "error parsing patchset: invalid file mode: {mode}")
-            }
-            Self::NoFilePath => "patch has no file path",
-            Self::BothDevNull => "patch has both original and modified as /dev/null",
-            Self::DeleteMissingOriginalPath => "delete patch has no original path",
-            Self::CreateMissingModifiedPath => "create patch has no modified path",
-        };
-        write!(f, "error parsing patchset: {msg}")
+            Self::InvalidDiffGitPath => write!(f, "unable to parse `diff --git` path"),
+            Self::InvalidFileMode(mode) => write!(f, "invalid file mode: {mode}"),
+            Self::NoFilePath => write!(f, "patch has no file path"),
+            Self::BothDevNull => write!(f, "patch has both original and modified as /dev/null"),
+            Self::DeleteMissingOriginalPath => write!(f, "delete patch has no original path"),
+            Self::CreateMissingModifiedPath => write!(f, "create patch has no modified path"),
+        }
     }
 }
 
-impl std::error::Error for PatchesParseError {}
-
 impl From<ParsePatchError> for PatchesParseError {
     fn from(e: ParsePatchError) -> Self {
-        Self::Patch(e)
+        PatchesParseErrorKind::Patch(e).into()
     }
 }
 
 impl From<BinaryPatchParseError> for PatchesParseError {
     fn from(e: BinaryPatchParseError) -> Self {
-        Self::Binary(e)
+        PatchesParseErrorKind::Binary(e).into()
     }
 }

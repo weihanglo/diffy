@@ -3,6 +3,7 @@
 use std::borrow::Cow;
 
 use super::error::ParsePatchError;
+use super::error::ParsePatchErrorKind;
 use super::Hunk;
 use super::HunkRange;
 use super::Line;
@@ -32,7 +33,10 @@ impl<'a, T: Text + ?Sized> Parser<'a, T> {
     }
 
     fn next(&mut self) -> Result<&'a T> {
-        let line = self.lines.next().ok_or(ParsePatchError::UnexpectedEof)?;
+        let line = self
+            .lines
+            .next()
+            .ok_or(ParsePatchErrorKind::UnexpectedEof)?;
         self.offset += line.len();
         Ok(line)
     }
@@ -89,12 +93,12 @@ fn patch_header<'a, T: Text + ToOwned + ?Sized>(
     while let Some(line) = parser.peek() {
         if line.starts_with("--- ") {
             if filename1.is_some() {
-                return Err(ParsePatchError::MultipleOriginalHeaders);
+                return Err(ParsePatchErrorKind::MultipleOriginalHeaders.into());
             }
             filename1 = Some(parse_filename("--- ", parser.next()?)?);
         } else if line.starts_with("+++ ") {
             if filename2.is_some() {
-                return Err(ParsePatchError::MultipleModifiedHeaders);
+                return Err(ParsePatchErrorKind::MultipleModifiedHeaders.into());
             }
             filename2 = Some(parse_filename("+++ ", parser.next()?)?);
         } else {
@@ -124,14 +128,14 @@ fn parse_filename<'a, T: Text + ToOwned + ?Sized>(
 ) -> Result<Cow<'a, [u8]>> {
     let line = line
         .strip_prefix(prefix)
-        .ok_or(ParsePatchError::InvalidFilename)?;
+        .ok_or(ParsePatchErrorKind::InvalidFilename)?;
 
     let filename = if let Some((filename, _)) = line.split_at_exclusive("\t") {
         filename
     } else if let Some((filename, _)) = line.split_at_exclusive("\n") {
         filename
     } else {
-        return Err(ParsePatchError::FilenameUnterminated);
+        return Err(ParsePatchErrorKind::FilenameUnterminated.into());
     };
 
     let filename = escaped_filename(filename)?;
@@ -164,7 +168,7 @@ fn hunks<'a, T: Text + ?Sized>(parser: &mut Parser<'a, T>) -> Result<Vec<Hunk<'a
 
     // check and verify that the Hunks are in sorted order and don't overlap
     if !verify_hunks_in_order(&hunks) {
-        return Err(ParsePatchError::HunksOutOfOrder);
+        return Err(ParsePatchErrorKind::HunksOutOfOrder.into());
     }
 
     Ok(hunks)
@@ -180,25 +184,25 @@ fn hunk<'a, T: Text + ?Sized>(parser: &mut Parser<'a, T>) -> Result<Hunk<'a, T>>
 fn hunk_header<T: Text + ?Sized>(input: &T) -> Result<(HunkRange, HunkRange, Option<&T>)> {
     let input = input
         .strip_prefix("@@ ")
-        .ok_or(ParsePatchError::InvalidHunkHeader)?;
+        .ok_or(ParsePatchErrorKind::InvalidHunkHeader)?;
 
     let (ranges, function_context) = input
         .split_at_exclusive(" @@")
-        .ok_or(ParsePatchError::HunkHeaderUnterminated)?;
+        .ok_or(ParsePatchErrorKind::HunkHeaderUnterminated)?;
     let function_context = function_context.strip_prefix(" ");
 
     let (range1, range2) = ranges
         .split_at_exclusive(" ")
-        .ok_or(ParsePatchError::InvalidHunkHeader)?;
+        .ok_or(ParsePatchErrorKind::InvalidHunkHeader)?;
     let range1 = range(
         range1
             .strip_prefix("-")
-            .ok_or(ParsePatchError::InvalidHunkHeader)?,
+            .ok_or(ParsePatchErrorKind::InvalidHunkHeader)?,
     )?;
     let range2 = range(
         range2
             .strip_prefix("+")
-            .ok_or(ParsePatchError::InvalidHunkHeader)?,
+            .ok_or(ParsePatchErrorKind::InvalidHunkHeader)?,
     )?;
     Ok((range1, range2, function_context))
 }
@@ -206,11 +210,11 @@ fn hunk_header<T: Text + ?Sized>(input: &T) -> Result<(HunkRange, HunkRange, Opt
 fn range<T: Text + ?Sized>(s: &T) -> Result<HunkRange> {
     let (start, len) = if let Some((start, len)) = s.split_at_exclusive(",") {
         (
-            start.parse().ok_or(ParsePatchError::InvalidRange)?,
-            len.parse().ok_or(ParsePatchError::InvalidRange)?,
+            start.parse().ok_or(ParsePatchErrorKind::InvalidRange)?,
+            len.parse().ok_or(ParsePatchErrorKind::InvalidRange)?,
         )
     } else {
-        (s.parse().ok_or(ParsePatchError::InvalidRange)?, 1)
+        (s.parse().ok_or(ParsePatchErrorKind::InvalidRange)?, 1)
     };
 
     Ok(HunkRange::new(start, len))
@@ -243,7 +247,7 @@ fn hunk_lines<'a, T: Text + ?Sized>(
             if hunk_complete {
                 break;
             }
-            return Err(ParsePatchError::ExpectedEndOfHunk);
+            return Err(ParsePatchErrorKind::ExpectedEndOfHunk.into());
         } else if let Some(line) = line.strip_prefix(" ") {
             if hunk_complete {
                 break;
@@ -256,7 +260,7 @@ fn hunk_lines<'a, T: Text + ?Sized>(
             Line::Context(*line)
         } else if let Some(line) = line.strip_prefix("-") {
             if no_newline_delete {
-                return Err(ParsePatchError::TooManyDeletedLines);
+                return Err(ParsePatchErrorKind::TooManyDeletedLines.into());
             }
             if hunk_complete {
                 break;
@@ -264,7 +268,7 @@ fn hunk_lines<'a, T: Text + ?Sized>(
             Line::Delete(line)
         } else if let Some(line) = line.strip_prefix("+") {
             if no_newline_insert {
-                return Err(ParsePatchError::TooManyInsertedLines);
+                return Err(ParsePatchErrorKind::TooManyInsertedLines.into());
             }
             if hunk_complete {
                 break;
@@ -280,7 +284,7 @@ fn hunk_lines<'a, T: Text + ?Sized>(
             // * don't increment line counts and continue to next directly
             let last_line = lines
                 .pop()
-                .ok_or(ParsePatchError::UnexpectedNoNewlineMarker)?;
+                .ok_or(ParsePatchErrorKind::UnexpectedNoNewlineMarker)?;
             let modified = match last_line {
                 Line::Context(line) => {
                     no_newline_context = true;
@@ -304,7 +308,7 @@ fn hunk_lines<'a, T: Text + ?Sized>(
                 // Hunk is complete, treat remaining content as garbage
                 break;
             } else {
-                return Err(ParsePatchError::UnexpectedHunkLine);
+                return Err(ParsePatchErrorKind::UnexpectedHunkLine.into());
             }
         };
 
@@ -327,7 +331,7 @@ fn hunk_lines<'a, T: Text + ?Sized>(
 
     // Final check: ensure we got the expected number of lines
     if old_count != expected_old || new_count != expected_new {
-        return Err(ParsePatchError::HunkMismatch);
+        return Err(ParsePatchErrorKind::HunkMismatch.into());
     }
 
     Ok(lines)
@@ -337,7 +341,7 @@ fn strip_newline<T: Text + ?Sized>(s: &T) -> Result<&T> {
     if let Some(stripped) = s.strip_suffix("\n") {
         Ok(stripped)
     } else {
-        Err(ParsePatchError::MissingNewline)
+        Err(ParsePatchErrorKind::MissingNewline.into())
     }
 }
 
@@ -377,7 +381,7 @@ garbage before hunk complete
 ";
         assert_eq!(
             parse(s).unwrap_err(),
-            super::ParsePatchError::UnexpectedHunkLine
+            super::ParsePatchErrorKind::UnexpectedHunkLine.into()
         );
     }
 

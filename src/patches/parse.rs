@@ -2,6 +2,7 @@
 
 use std::borrow::Cow;
 
+use super::error::PatchesParseErrorKind;
 use super::Binary;
 use super::FileMode;
 use super::FileOperation;
@@ -154,7 +155,9 @@ impl<'a> Patches<'a> {
                 }
                 Binary::Fail => {
                     let path = header.diff_git_line.unwrap_or("<unknown>").to_owned();
-                    return Some(Err(PatchesParseError::BinaryNotSupported { path }));
+                    return Some(Err(
+                        PatchesParseErrorKind::BinaryNotSupported { path }.into()
+                    ));
                 }
                 Binary::Keep => {
                     let operation = match extract_file_op_binary(&header) {
@@ -184,7 +187,9 @@ impl<'a> Patches<'a> {
                 }
                 Binary::Fail => {
                     let path = header.diff_git_line.unwrap_or("<unknown>").to_owned();
-                    return Some(Err(PatchesParseError::BinaryNotSupported { path }));
+                    return Some(Err(
+                        PatchesParseErrorKind::BinaryNotSupported { path }.into()
+                    ));
                 }
                 Binary::Keep => {
                     // Find "GIT binary patch" in header and parse from there
@@ -327,7 +332,7 @@ impl<'a> Iterator for Patches<'a> {
                 if result.is_none() {
                     self.finished = true;
                     if !self.found_any {
-                        return Some(Err(PatchesParseError::NoPatchesFound));
+                        return Some(Err(PatchesParseErrorKind::NoPatchesFound.into()));
                     }
                 }
                 result
@@ -337,7 +342,7 @@ impl<'a> Iterator for Patches<'a> {
                 if result.is_none() {
                     self.finished = true;
                     if !self.found_any {
-                        return Some(Err(PatchesParseError::NoPatchesFound));
+                        return Some(Err(PatchesParseErrorKind::NoPatchesFound.into()));
                     }
                 }
                 result
@@ -433,14 +438,14 @@ pub fn extract_file_op_unidiff<'a>(
     let is_delete = modified.as_deref() == Some(DEV_NULL);
 
     if is_create && is_delete {
-        return Err(PatchesParseError::BothDevNull);
+        return Err(PatchesParseErrorKind::BothDevNull.into());
     }
 
     if is_delete {
-        let path = original.ok_or(PatchesParseError::DeleteMissingOriginalPath)?;
+        let path = original.ok_or(PatchesParseErrorKind::DeleteMissingOriginalPath)?;
         Ok(FileOperation::Delete(path))
     } else if is_create {
-        let path = modified.ok_or(PatchesParseError::CreateMissingModifiedPath)?;
+        let path = modified.ok_or(PatchesParseErrorKind::CreateMissingModifiedPath)?;
         Ok(FileOperation::Create(path))
     } else {
         match (original, modified) {
@@ -460,7 +465,7 @@ pub fn extract_file_op_unidiff<'a>(
                     original,
                 })
             }
-            (None, None) => Err(PatchesParseError::NoFilePath),
+            (None, None) => Err(PatchesParseErrorKind::NoFilePath.into()),
         }
     }
 }
@@ -486,7 +491,7 @@ fn extract_file_op_binary<'a>(
 
     // Use `diff --git <old> <new>` for binary patches.
     let Some((original, modified)) = header.diff_git_line.and_then(parse_diff_git_path) else {
-        return Err(PatchesParseError::InvalidDiffGitPath);
+        return Err(PatchesParseErrorKind::InvalidDiffGitPath.into());
     };
 
     let op = if header.new_file_mode.is_some() {
@@ -542,7 +547,7 @@ fn extract_file_op_gitdiff<'a>(
 
     // Fall back to `diff --git <old> <new>` for mode-only and empty file changes.
     let Some((original, modified)) = header.diff_git_line.and_then(parse_diff_git_path) else {
-        return Err(PatchesParseError::InvalidDiffGitPath);
+        return Err(PatchesParseErrorKind::InvalidDiffGitPath.into());
     };
 
     let op = if header.new_file_mode.is_some() {

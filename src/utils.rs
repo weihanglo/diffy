@@ -5,6 +5,7 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::hash::Hash;
 
+use crate::patch::error::ParsePatchErrorKind;
 use crate::ParsePatchError;
 
 /// Characters that require escaping in filenames.
@@ -252,7 +253,7 @@ pub(crate) fn escaped_filename<T: Text + ToOwned + ?Sized>(
         // No need to escape
         let bytes = filename.as_bytes();
         if bytes.iter().any(|b| ESCAPED_CHARS_BYTES.contains(b)) {
-            return Err(ParsePatchError::InvalidCharInUnquotedFilename);
+            return Err(ParsePatchErrorKind::InvalidCharInUnquotedFilename.into());
         }
         Ok(bytes.into())
     }
@@ -274,7 +275,7 @@ fn _escaped_filename<T: Text + ToOwned + ?Sized>(
 
             i += 1;
             if i >= bytes.len() {
-                return Err(ParsePatchError::ExpectedEscapedChar);
+                return Err(ParsePatchErrorKind::ExpectedEscapedChar.into());
             }
 
             let decoded = match bytes[i] {
@@ -284,13 +285,13 @@ fn _escaped_filename<T: Text + ToOwned + ?Sized>(
                 b'r' => b'\r',
                 b'\"' => b'\"',
                 b'\\' => b'\\',
-                _ => return Err(ParsePatchError::InvalidEscapedChar),
+                _ => return Err(ParsePatchErrorKind::InvalidEscapedChar.into()),
             };
             result.push(decoded);
             i += 1;
             last_copy = i;
         } else if ESCAPED_CHARS_BYTES.contains(&bytes[i]) {
-            return Err(ParsePatchError::InvalidUnescapedChar);
+            return Err(ParsePatchErrorKind::InvalidUnescapedChar.into());
         } else {
             i += 1;
         }
