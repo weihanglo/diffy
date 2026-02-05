@@ -115,7 +115,10 @@ impl<'a> Patch<'a, str> {
     /// ```
     #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &'a str) -> Result<Patch<'a, str>, ParsePatchError> {
-        parse::parse(s)
+        parse::parse(s).map_err(|mut e| {
+            e.set_input(s);
+            e
+        })
     }
 }
 

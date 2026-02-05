@@ -2,17 +2,21 @@
 
 use std::fmt;
 use std::ops::Range;
+use std::sync::Arc;
 
 #[cfg(feature = "binary")]
 use super::base85::Base85Error;
 #[cfg(feature = "binary")]
 use super::delta::DeltaError;
 
+use crate::utils::format_parse_error;
+
 /// Error type for binary patch operations.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BinaryPatchParseError {
     pub(crate) kind: BinaryPatchParseErrorKind,
     span: Option<Range<usize>>,
+    input: Option<Arc<str>>,
 }
 
 impl BinaryPatchParseError {
@@ -21,6 +25,7 @@ impl BinaryPatchParseError {
         Self {
             kind,
             span: Some(span),
+            input: None,
         }
     }
 
@@ -28,19 +33,22 @@ impl BinaryPatchParseError {
     pub fn span(&self) -> Option<Range<usize>> {
         self.span.clone()
     }
+
+    /// Attaches the original input for richer error display.
+    pub fn set_input(&mut self, input: &str) {
+        self.input = Some(input.into());
+    }
 }
 
 impl fmt::Display for BinaryPatchParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(span) = &self.span {
-            write!(
-                f,
-                "error parsing binary patch at byte {}: {}",
-                span.start, self.kind
-            )
-        } else {
-            write!(f, "error parsing binary patch: {}", self.kind)
-        }
+        format_parse_error(
+            f,
+            "binary patch",
+            self.span.as_ref(),
+            self.input.as_deref(),
+            &self.kind,
+        )
     }
 }
 
@@ -48,7 +56,11 @@ impl std::error::Error for BinaryPatchParseError {}
 
 impl From<BinaryPatchParseErrorKind> for BinaryPatchParseError {
     fn from(kind: BinaryPatchParseErrorKind) -> Self {
-        Self { kind, span: None }
+        Self {
+            kind,
+            span: None,
+            input: None,
+        }
     }
 }
 

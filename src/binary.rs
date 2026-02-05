@@ -160,6 +160,11 @@ impl<'a> BinaryParser<'a> {
         self.input[self.offset..].lines().next()
     }
 
+    /// Creates an error with the current offset as span.
+    fn error(&self, kind: BinaryPatchParseErrorKind) -> BinaryPatchParseError {
+        BinaryPatchParseError::new(kind, self.offset..self.offset)
+    }
+
     fn next_line(&mut self) -> Option<&'a str> {
         let rest = &self.input[self.offset..];
         let line = rest.lines().next()?;
@@ -209,12 +214,12 @@ pub(crate) fn parse_binary_patch(input: &str) -> Result<BinaryPatch<'_>, BinaryP
 
     // Parse first block (forward: original -> modified)
     let Some(forward) = parse_binary_block(&mut parser) else {
-        return Err(BinaryPatchParseErrorKind::MissingForwardBlock.into());
+        return Err(parser.error(BinaryPatchParseErrorKind::MissingForwardBlock));
     };
 
     // Parse second block (reverse: modified -> original)
     let Some(reverse) = parse_binary_block(&mut parser) else {
-        return Err(BinaryPatchParseErrorKind::MissingReverseBlock.into());
+        return Err(parser.error(BinaryPatchParseErrorKind::MissingReverseBlock));
     };
 
     Ok(BinaryPatch::Full { forward, reverse })

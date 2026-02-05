@@ -2,15 +2,18 @@
 
 use std::fmt;
 use std::ops::Range;
+use std::sync::Arc;
 
 use crate::binary::BinaryPatchParseError;
 use crate::patch::ParsePatchError;
+use crate::utils::format_parse_error;
 
 /// An error returned when parsing patches fails.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PatchesParseError {
     pub(crate) kind: PatchesParseErrorKind,
     span: Option<Range<usize>>,
+    input: Option<Arc<str>>,
 }
 
 impl PatchesParseError {
@@ -19,6 +22,7 @@ impl PatchesParseError {
         Self {
             kind,
             span: Some(span),
+            input: None,
         }
     }
 
@@ -26,19 +30,27 @@ impl PatchesParseError {
     pub fn span(&self) -> Option<Range<usize>> {
         self.span.clone()
     }
+
+    /// Attaches the original input for richer error display.
+    pub fn set_input(&mut self, input: &str) {
+        self.input = Some(input.into());
+    }
+
+    /// Sets the byte range span for this error.
+    pub(crate) fn set_span(&mut self, span: Range<usize>) {
+        self.span = Some(span);
+    }
 }
 
 impl fmt::Display for PatchesParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(span) = &self.span {
-            write!(
-                f,
-                "error parsing patchset at byte {}: {}",
-                span.start, self.kind
-            )
-        } else {
-            write!(f, "error parsing patchset: {}", self.kind)
-        }
+        format_parse_error(
+            f,
+            "patchset",
+            self.span.as_ref(),
+            self.input.as_deref(),
+            &self.kind,
+        )
     }
 }
 
@@ -46,7 +58,11 @@ impl std::error::Error for PatchesParseError {}
 
 impl From<PatchesParseErrorKind> for PatchesParseError {
     fn from(kind: PatchesParseErrorKind) -> Self {
-        Self { kind, span: None }
+        Self {
+            kind,
+            span: None,
+            input: None,
+        }
     }
 }
 

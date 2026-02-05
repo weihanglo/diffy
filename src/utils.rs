@@ -238,6 +238,59 @@ fn find_byte(haystack: &[u8], byte: u8) -> Option<usize> {
     haystack.iter().position(|&b| b == byte)
 }
 
+/// Converts a byte offset to 1-based line and column numbers.
+///
+/// Scans input up to `offset` counting newlines.
+/// Returns `(line, column)` where both are 1-based.
+/// Column is measured in bytes from the start of the line.
+///
+/// ## Panics
+///
+/// Panics if `offset > input.len()`.
+fn translate_position(input: &[u8], offset: usize) -> (usize, usize) {
+    assert!(offset <= input.len(), "offset out of bounds");
+
+    let mut line = 1;
+    let mut line_start = 0;
+
+    for (i, &byte) in input[..offset].iter().enumerate() {
+        if byte == b'\n' {
+            line += 1;
+            line_start = i + 1;
+        }
+    }
+
+    let column = offset - line_start + 1;
+    (line, column)
+}
+
+/// Formats a parse error with optional source snippet.
+pub(crate) fn format_parse_error(
+    f: &mut std::fmt::Formatter<'_>,
+    label: &str,
+    span: Option<&std::ops::Range<usize>>,
+    input: Option<&str>,
+    kind: &impl std::fmt::Display,
+) -> std::fmt::Result {
+    match (span, input) {
+        (Some(span), Some(input)) => {
+            let (line, col) = translate_position(input.as_bytes(), span.start);
+            writeln!(f, "error parsing {label} at line {line}, column {col}")?;
+
+            let line_content = input.lines().nth(line - 1).unwrap_or("");
+            let line_num_width = line.to_string().len();
+            writeln!(f, "{:width$} |", "", width = line_num_width)?;
+            writeln!(f, "{line} | {line_content}")?;
+            writeln!(f, "{:width$} | {:>col$}", "", "^", width = line_num_width)?;
+            write!(f, "{kind}")
+        }
+        (Some(span), None) => {
+            write!(f, "error parsing {label} at byte {}: {kind}", span.start)
+        }
+        _ => write!(f, "error parsing {label}: {kind}"),
+    }
+}
+
 /// Decodes escape sequences in a quoted filename.
 ///
 /// See [`ESCAPED_CHARS`] for supported escapes.
@@ -302,5 +355,61 @@ fn _escaped_filename<T: Text + ToOwned + ?Sized>(
         Ok(Cow::Owned(result))
     } else {
         Ok(Cow::Borrowed(bytes))
+    }
+}
+
+#[cfg(test)]
+mod translate_position_tests {
+    use super::translate_position;
+
+    #[test]
+    fn first_line_first_column() {
+        assert_eq!(translate_position(b"hello", 0), (1, 1));
+    }
+
+    #[test]
+    fn first_line_middle() {
+        assert_eq!(translate_position(b"hello", 3), (1, 4));
+    }
+
+    #[test]
+    fn second_line_start() {
+        assert_eq!(translate_position(b"line1\nline2", 6), (2, 1));
+    }
+
+    #[test]
+    fn second_line_middle() {
+        assert_eq!(translate_position(b"line1\nline2", 9), (2, 4));
+    }
+
+    #[test]
+    fn at_newline() {
+        // Offset at '\n' is still on line 1
+        assert_eq!(translate_position(b"line1\nline2", 5), (1, 6));
+    }
+
+    #[test]
+    fn multiple_lines() {
+        let input = b"a\nb\nc\nd";
+        assert_eq!(translate_position(input, 0), (1, 1)); // 'a'
+        assert_eq!(translate_position(input, 2), (2, 1)); // 'b'
+        assert_eq!(translate_position(input, 4), (3, 1)); // 'c'
+        assert_eq!(translate_position(input, 6), (4, 1)); // 'd'
+    }
+
+    #[test]
+    fn empty_input_at_zero() {
+        assert_eq!(translate_position(b"", 0), (1, 1));
+    }
+
+    #[test]
+    fn at_end_of_input() {
+        assert_eq!(translate_position(b"hello", 5), (1, 6));
+    }
+
+    #[test]
+    #[should_panic(expected = "offset out of bounds")]
+    fn past_end_panics() {
+        translate_position(b"hello", 6);
     }
 }
