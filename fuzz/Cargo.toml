@@ -1,0 +1,21 @@
+[package]
+name = "diffy-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.diffy]
+path = ".."
+
+[[bin]]
+name = "patch_from_str"
+path = "fuzz_targets/patch_from_str.rs"
+test = false
+doc = false
+bench = false
