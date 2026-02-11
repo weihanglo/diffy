@@ -210,7 +210,9 @@ pub(crate) fn parse_binary_patch(input: &str) -> Result<BinaryPatch<'_>, BinaryP
     let mut parser = BinaryParser::new(input);
 
     // Expect "GIT binary patch" marker
-    assert_eq!(parser.next_line(), Some("GIT binary patch"));
+    if parser.next_line() != Some("GIT binary patch") {
+        return Err(parser.error(BinaryPatchParseErrorKind::InvalidHeader));
+    }
 
     // Parse first block (forward: original -> modified)
     let Some(forward) = parse_binary_block(&mut parser) else {
@@ -353,11 +355,26 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "assertion")]
-    fn parse_missing_marker() {
-        // Without "GIT binary patch" marker, parse_binary_patch panics (debug_assert)
+    fn parse_invalid_header() {
+        use snapbox::assert_data_eq;
+        use snapbox::str;
+
+        // Without "GIT binary patch" marker, parse_binary_patch returns error
         let input = "literal 10\nUcmV+l0QLU>0RjUA1qKHQ2>`DEE&u=k\n\n";
-        let _ = parse_binary_patch(input);
+        let mut err = parse_binary_patch(input).unwrap_err();
+        assert_eq!(err.kind, BinaryPatchParseErrorKind::InvalidHeader);
+
+        err.set_input(input);
+        assert_data_eq!(
+            err.to_string(),
+            str![[r#"
+error parsing binary patch at line 2, column 1
+  |
+2 | UcmV+l0QLU>0RjUA1qKHQ2>`DEE&u=k
+  | ^
+invalid binary patch header
+"#]]
+        );
     }
 
     #[test]

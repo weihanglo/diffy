@@ -76,6 +76,11 @@ pub(crate) enum BinaryPatchParseErrorKind {
     #[cfg(feature = "binary")]
     Delta(DeltaError),
 
+    /// Missing or invalid "GIT binary patch" header.
+    // TODO: Switch to #[expect(dead_code)] when MSRV >= 1.81
+    #[cfg_attr(not(feature = "binary"), allow(dead_code))]
+    InvalidHeader,
+
     /// First binary block (forward) not found.
     MissingForwardBlock,
 
@@ -104,6 +109,7 @@ impl fmt::Display for BinaryPatchParseErrorKind {
             Self::Base85(e) => write!(f, "{e}"),
             #[cfg(feature = "binary")]
             Self::Delta(e) => write!(f, "{e}"),
+            Self::InvalidHeader => write!(f, "invalid binary patch header"),
             Self::MissingForwardBlock => write!(f, "first binary block not found"),
             Self::MissingReverseBlock => write!(f, "second binary block not found"),
             Self::NoBinaryData => write!(f, "no binary data available"),

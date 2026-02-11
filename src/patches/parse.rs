@@ -702,8 +702,8 @@ fn parse_quoted_diff_git_path(line: &str) -> Option<(Cow<'_, str>, Cow<'_, str>)
         let rest = &line[pos + 1..];
         (first, rest)
     } else {
-        // Both unquoted. Shouldn't reach here since we've checked for `"` first
-        unreachable!("must be quoted");
+        // Malformed: ends with `"` but no valid quoted path found
+        return None;
     };
 
     let left = escaped_filename(left_raw).ok().and_then(|cow| match cow {
