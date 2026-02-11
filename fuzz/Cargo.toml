@@ -19,3 +19,24 @@ path = "fuzz_targets/patch_from_str.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "patch_from_bytes"
+path = "fuzz_targets/patch_from_bytes.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "patches_parse_gitdiff"
+path = "fuzz_targets/patches_parse_gitdiff.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "patches_parse_unidiff"
+path = "fuzz_targets/patches_parse_unidiff.rs"
+test = false
+doc = false
+bench = false
