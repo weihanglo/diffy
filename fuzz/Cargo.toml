@@ -12,6 +12,7 @@ libfuzzer-sys = "0.4"
 
 [dependencies.diffy]
 path = ".."
+features = ["binary"]
 
 [[bin]]
 name = "patch_from_str"
@@ -37,6 +38,13 @@ bench = false
 [[bin]]
 name = "patches_parse_unidiff"
 path = "fuzz_targets/patches_parse_unidiff.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "patches_binary"
+path = "fuzz_targets/patches_binary.rs"
 test = false
 doc = false
 bench = false
