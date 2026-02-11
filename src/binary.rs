@@ -9,9 +9,11 @@
 mod base85;
 #[cfg(feature = "binary")]
 mod delta;
-mod error;
+pub(crate) mod error;
 
 pub use error::BinaryPatchParseError;
+
+use error::BinaryPatchParseErrorKind;
 
 /// The type of a binary patch block.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,7 +78,7 @@ impl<'a> BinaryPatch<'a> {
     pub fn apply(&self, original: &[u8]) -> Result<Vec<u8>, BinaryPatchParseError> {
         match self {
             BinaryPatch::Full { forward, .. } => Self::apply_block(forward, original),
-            BinaryPatch::Marker => Err(BinaryPatchParseError::NoBinaryData),
+            BinaryPatch::Marker => Err(BinaryPatchParseErrorKind::NoBinaryData.into()),
         }
     }
 
@@ -90,7 +92,7 @@ impl<'a> BinaryPatch<'a> {
     pub fn apply_reverse(&self, modified: &[u8]) -> Result<Vec<u8>, BinaryPatchParseError> {
         match self {
             BinaryPatch::Full { reverse, .. } => Self::apply_block(reverse, modified),
-            BinaryPatch::Marker => Err(BinaryPatchParseError::NoBinaryData),
+            BinaryPatch::Marker => Err(BinaryPatchParseErrorKind::NoBinaryData.into()),
         }
     }
 
@@ -117,7 +119,7 @@ impl<'a> BinaryPatch<'a> {
         let mut decompressed = Vec::new();
         decoder
             .read_to_end(&mut decompressed)
-            .map_err(|e| BinaryPatchParseError::DecompressionFailed(e.to_string()))?;
+            .map_err(|e| BinaryPatchParseErrorKind::DecompressionFailed(e.to_string()))?;
 
         Ok(decompressed)
     }
@@ -156,6 +158,11 @@ impl<'a> BinaryParser<'a> {
 
     fn peek_line(&self) -> Option<&'a str> {
         self.input[self.offset..].lines().next()
+    }
+
+    /// Creates an error with the current offset as span.
+    fn error(&self, kind: BinaryPatchParseErrorKind) -> BinaryPatchParseError {
+        BinaryPatchParseError::new(kind, self.offset..self.offset)
     }
 
     fn next_line(&mut self) -> Option<&'a str> {
@@ -207,12 +214,12 @@ pub(crate) fn parse_binary_patch(input: &str) -> Result<BinaryPatch<'_>, BinaryP
 
     // Parse first block (forward: original -> modified)
     let Some(forward) = parse_binary_block(&mut parser) else {
-        return Err(BinaryPatchParseError::MissingForwardBlock);
+        return Err(parser.error(BinaryPatchParseErrorKind::MissingForwardBlock));
     };
 
     // Parse second block (reverse: modified -> original)
     let Some(reverse) = parse_binary_block(&mut parser) else {
-        return Err(BinaryPatchParseError::MissingReverseBlock);
+        return Err(parser.error(BinaryPatchParseErrorKind::MissingReverseBlock));
     };
 
     Ok(BinaryPatch::Full { forward, reverse })
@@ -279,7 +286,7 @@ fn decode_base85_lines(data: &str) -> Result<Vec<u8>, BinaryPatchParseError> {
         let line_bytes = line.as_bytes();
 
         let length = decode_line_length(line_bytes[0])
-            .ok_or(BinaryPatchParseError::InvalidLineLengthIndicator)?;
+            .ok_or(BinaryPatchParseErrorKind::InvalidLineLengthIndicator)?;
         let encoded = &line[1..];
         let start = result.len();
         base85::decode_into(encoded, &mut result)?;

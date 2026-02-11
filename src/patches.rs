@@ -3,7 +3,7 @@
 //! This module provides [`Patches`] for parsing patches that contain changes
 //! to multiple files, like the output of `git diff` or `git format-patch`.
 
-mod error;
+pub(crate) mod error;
 mod parse;
 #[cfg(test)]
 mod tests;
@@ -14,6 +14,8 @@ use crate::binary::BinaryPatch;
 use crate::Patch;
 
 pub use error::PatchesParseError;
+
+use error::PatchesParseErrorKind as Kind;
 pub use parse::Patches;
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -168,7 +170,7 @@ impl std::str::FromStr for FileMode {
             "100755" => Ok(Self::Executable),
             "120000" => Ok(Self::Symlink),
             "160000" => Ok(Self::Gitlink),
-            _ => Err(PatchesParseError::InvalidFileMode(mode.to_owned())),
+            _ => Err(Kind::InvalidFileMode(mode.to_owned()).into()),
         }
     }
 }

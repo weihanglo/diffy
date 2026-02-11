@@ -1,13 +1,70 @@
 //! Error types for patch parsing.
 
 use std::fmt;
+use std::ops::Range;
+use std::sync::Arc;
+
+use crate::utils::format_parse_error;
 
 /// An error returned when parsing a `Patch` using [`Patch::from_str`] fails.
 ///
 /// [`Patch::from_str`]: struct.Patch.html#method.from_str
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsePatchError {
+    pub(crate) kind: ParsePatchErrorKind,
+    span: Option<Range<usize>>,
+    input: Option<Arc<str>>,
+}
+
+impl ParsePatchError {
+    /// Creates a new error with the given kind and span.
+    pub(crate) fn new(kind: ParsePatchErrorKind, span: Range<usize>) -> Self {
+        Self {
+            kind,
+            span: Some(span),
+            input: None,
+        }
+    }
+
+    /// Returns the byte range in the input where the error occurred.
+    pub fn span(&self) -> Option<Range<usize>> {
+        self.span.clone()
+    }
+
+    /// Attaches the original input for richer error display.
+    pub fn set_input(&mut self, input: &str) {
+        self.input = Some(input.into());
+    }
+}
+
+impl fmt::Display for ParsePatchError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        format_parse_error(
+            f,
+            "patch",
+            self.span.as_ref(),
+            self.input.as_deref(),
+            &self.kind,
+        )
+    }
+}
+
+impl std::error::Error for ParsePatchError {}
+
+impl From<ParsePatchErrorKind> for ParsePatchError {
+    fn from(kind: ParsePatchErrorKind) -> Self {
+        Self {
+            kind,
+            span: None,
+            input: None,
+        }
+    }
+}
+
+/// The kind of error that occurred when parsing a patch.
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum ParsePatchError {
+pub(crate) enum ParsePatchErrorKind {
     /// Unexpected end of input.
     UnexpectedEof,
 
@@ -69,7 +126,7 @@ pub enum ParsePatchError {
     MissingNewline,
 }
 
-impl fmt::Display for ParsePatchError {
+impl fmt::Display for ParsePatchErrorKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let msg = match self {
             Self::UnexpectedEof => "unexpected EOF",
@@ -93,8 +150,6 @@ impl fmt::Display for ParsePatchError {
             Self::UnexpectedHunkLine => "unexpected line in hunk body",
             Self::MissingNewline => "missing newline",
         };
-        write!(f, "error parsing patch: {msg}")
+        write!(f, "{msg}")
     }
 }
-
-impl std::error::Error for ParsePatchError {}

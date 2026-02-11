@@ -2,6 +2,7 @@
 
 use std::borrow::Cow;
 
+use super::error::PatchesParseErrorKind;
 use super::Binary;
 use super::FileMode;
 use super::FileOperation;
@@ -75,6 +76,26 @@ impl<'a> Patches<'a> {
             finished: false,
             found_any: false,
         }
+    }
+
+    /// Creates an error with the current offset as span and input for display.
+    fn error(&self, kind: PatchesParseErrorKind) -> PatchesParseError {
+        let mut err = PatchesParseError::new(kind, self.offset..self.offset);
+        err.set_input(self.input);
+        err
+    }
+
+    /// Attaches input to an error for richer display.
+    fn with_input(&self, mut err: PatchesParseError) -> PatchesParseError {
+        err.set_input(self.input);
+        err
+    }
+
+    /// Wraps an error with a span at the given absolute offset and attaches input.
+    fn error_at(&self, mut err: PatchesParseError, offset: usize) -> PatchesParseError {
+        err.set_span(offset..offset);
+        err.set_input(self.input);
+        err
     }
 
     /// Finds the next `diff --git` boundary and returns its offset.
@@ -154,7 +175,9 @@ impl<'a> Patches<'a> {
                 }
                 Binary::Fail => {
                     let path = header.diff_git_line.unwrap_or("<unknown>").to_owned();
-                    return Some(Err(PatchesParseError::BinaryNotSupported { path }));
+                    return Some(Err(
+                        self.error(PatchesParseErrorKind::BinaryNotSupported { path })
+                    ));
                 }
                 Binary::Keep => {
                     let operation = match extract_file_op_binary(&header) {
@@ -184,7 +207,9 @@ impl<'a> Patches<'a> {
                 }
                 Binary::Fail => {
                     let path = header.diff_git_line.unwrap_or("<unknown>").to_owned();
-                    return Some(Err(PatchesParseError::BinaryNotSupported { path }));
+                    return Some(Err(
+                        self.error(PatchesParseErrorKind::BinaryNotSupported { path })
+                    ));
                 }
                 Binary::Keep => {
                     // Find "GIT binary patch" in header and parse from there
@@ -225,7 +250,7 @@ impl<'a> Patches<'a> {
         // Extract file operation
         let operation = match extract_file_op_gitdiff(&header, &patch) {
             Ok(op) => op,
-            Err(e) => return Some(Err(e)),
+            Err(e) => return Some(Err(self.error_at(e, patch_start))),
         };
 
         // Parse file modes
@@ -300,10 +325,11 @@ impl<'a> Patches<'a> {
             Err(e) => return Some(Err(e.into())),
         };
 
+        let abs_patch_start = self.offset + patch_start;
         let operation = match extract_file_op_unidiff(patch.original_path(), patch.modified_path())
         {
             Ok(op) => op,
-            Err(e) => return Some(Err(e)),
+            Err(e) => return Some(Err(self.error_at(e, abs_patch_start))),
         };
 
         // Advance offset past this patch
@@ -321,13 +347,13 @@ impl<'a> Iterator for Patches<'a> {
             return None;
         }
 
-        match self.opts.format {
+        let result = match self.opts.format {
             Format::GitDiff => {
                 let result = self.next_gitdiff_patch();
                 if result.is_none() {
                     self.finished = true;
                     if !self.found_any {
-                        return Some(Err(PatchesParseError::NoPatchesFound));
+                        return Some(Err(self.error(PatchesParseErrorKind::NoPatchesFound)));
                     }
                 }
                 result
@@ -337,12 +363,15 @@ impl<'a> Iterator for Patches<'a> {
                 if result.is_none() {
                     self.finished = true;
                     if !self.found_any {
-                        return Some(Err(PatchesParseError::NoPatchesFound));
+                        return Some(Err(self.error(PatchesParseErrorKind::NoPatchesFound)));
                     }
                 }
                 result
             }
-        }
+        };
+
+        // Attach input to errors for richer display
+        result.map(|r| r.map_err(|e| self.with_input(e)))
     }
 }
 
@@ -433,14 +462,14 @@ pub fn extract_file_op_unidiff<'a>(
     let is_delete = modified.as_deref() == Some(DEV_NULL);
 
     if is_create && is_delete {
-        return Err(PatchesParseError::BothDevNull);
+        return Err(PatchesParseErrorKind::BothDevNull.into());
     }
 
     if is_delete {
-        let path = original.ok_or(PatchesParseError::DeleteMissingOriginalPath)?;
+        let path = original.ok_or(PatchesParseErrorKind::DeleteMissingOriginalPath)?;
         Ok(FileOperation::Delete(path))
     } else if is_create {
-        let path = modified.ok_or(PatchesParseError::CreateMissingModifiedPath)?;
+        let path = modified.ok_or(PatchesParseErrorKind::CreateMissingModifiedPath)?;
         Ok(FileOperation::Create(path))
     } else {
         match (original, modified) {
@@ -460,7 +489,7 @@ pub fn extract_file_op_unidiff<'a>(
                     original,
                 })
             }
-            (None, None) => Err(PatchesParseError::NoFilePath),
+            (None, None) => Err(PatchesParseErrorKind::NoFilePath.into()),
         }
     }
 }
@@ -486,7 +515,7 @@ fn extract_file_op_binary<'a>(
 
     // Use `diff --git <old> <new>` for binary patches.
     let Some((original, modified)) = header.diff_git_line.and_then(parse_diff_git_path) else {
-        return Err(PatchesParseError::InvalidDiffGitPath);
+        return Err(PatchesParseErrorKind::InvalidDiffGitPath.into());
     };
 
     let op = if header.new_file_mode.is_some() {
@@ -542,7 +571,7 @@ fn extract_file_op_gitdiff<'a>(
 
     // Fall back to `diff --git <old> <new>` for mode-only and empty file changes.
     let Some((original, modified)) = header.diff_git_line.and_then(parse_diff_git_path) else {
-        return Err(PatchesParseError::InvalidDiffGitPath);
+        return Err(PatchesParseErrorKind::InvalidDiffGitPath.into());
     };
 
     let op = if header.new_file_mode.is_some() {

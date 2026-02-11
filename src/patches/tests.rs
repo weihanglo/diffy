@@ -1,10 +1,10 @@
 //! Tests for patchset parsing.
 
+use super::error::PatchesParseErrorKind;
 use super::FileMode;
 use super::FileOperation;
 use super::ParseOptions;
 use super::Patches;
-use super::PatchesParseError;
 
 mod file_operation {
     use super::*;
@@ -611,7 +611,10 @@ old mode 100644
 new mode 100755
 ";
         let result: Result<Vec<_>, _> = Patches::parse(content, ParseOptions::gitdiff()).collect();
-        assert_eq!(result.unwrap_err(), PatchesParseError::InvalidDiffGitPath);
+        assert_eq!(
+            result.unwrap_err().kind,
+            PatchesParseErrorKind::InvalidDiffGitPath
+        );
     }
 
     #[test]
@@ -623,7 +626,10 @@ old mode 100644
 new mode 100755
 ";
         let result: Result<Vec<_>, _> = Patches::parse(content, ParseOptions::gitdiff()).collect();
-        assert_eq!(result.unwrap_err(), PatchesParseError::InvalidDiffGitPath);
+        assert_eq!(
+            result.unwrap_err().kind,
+            PatchesParseErrorKind::InvalidDiffGitPath
+        );
     }
 
     #[test]
@@ -828,8 +834,8 @@ Binary files a/image.png and b/image.png differ
             Patches::parse(content, ParseOptions::gitdiff().fail_on_binary()).collect();
 
         assert!(matches!(
-            result.unwrap_err(),
-            PatchesParseError::BinaryNotSupported { .. }
+            result.unwrap_err().kind,
+            PatchesParseErrorKind::BinaryNotSupported { .. }
         ));
     }
 
@@ -850,8 +856,8 @@ Binary files a/binary.bin and b/binary.bin differ
             Patches::parse(content, ParseOptions::gitdiff().fail_on_binary()).collect();
 
         assert!(matches!(
-            result.unwrap_err(),
-            PatchesParseError::BinaryNotSupported { .. }
+            result.unwrap_err().kind,
+            PatchesParseErrorKind::BinaryNotSupported { .. }
         ));
     }
 
@@ -1147,9 +1153,10 @@ It should be ignored
     fn empty_content() {
         let err: Result<Vec<_>, _> = Patches::parse("", ParseOptions::unidiff()).collect();
         let err = err.unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "error parsing patchset: no valid patches found"
+        assert!(
+            err.to_string().contains("no valid patches found"),
+            "unexpected error: {}",
+            err
         );
     }
 
@@ -1158,9 +1165,10 @@ It should be ignored
         let content = "Some random text\nNo patches here\n";
         let err: Result<Vec<_>, _> = Patches::parse(content, ParseOptions::unidiff()).collect();
         let err = err.unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "error parsing patchset: no valid patches found"
+        assert!(
+            err.to_string().contains("no valid patches found"),
+            "unexpected error: {}",
+            err
         );
     }
 
@@ -1174,9 +1182,10 @@ No patches here
 ";
         let err: Result<Vec<_>, _> = Patches::parse(content, ParseOptions::unidiff()).collect();
         let err = err.unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "error parsing patchset: no valid patches found"
+        assert!(
+            err.to_string().contains("no valid patches found"),
+            "unexpected error: {}",
+            err
         );
     }
 
@@ -1250,7 +1259,7 @@ No patches here
 +new
 ";
         let result: Result<Vec<_>, _> = Patches::parse(content, ParseOptions::unidiff()).collect();
-        assert_eq!(result.unwrap_err(), PatchesParseError::BothDevNull);
+        assert_eq!(result.unwrap_err().kind, PatchesParseErrorKind::BothDevNull);
     }
 
     #[test]
@@ -1439,9 +1448,115 @@ In a hole in the ground there lived a hobbit
 ";
         let err: Result<Vec<_>, _> = Patches::parse(content, ParseOptions::unidiff()).collect();
         let err = err.unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "error parsing patchset: no valid patches found"
+        assert!(
+            err.to_string().contains("no valid patches found"),
+            "unexpected error: {}",
+            err
         );
+    }
+}
+
+mod error_display {
+    use super::*;
+    use crate::patch::error::ParsePatchErrorKind;
+    use crate::Patch;
+    use snapbox::assert_data_eq;
+    use snapbox::str;
+
+    #[test]
+    fn patches_parse_error_no_patches_found() {
+        let content = "not a patch\n";
+        let err: Result<Vec<_>, _> = Patches::parse(content, ParseOptions::unidiff()).collect();
+        let err = err.unwrap_err();
+        assert_data_eq!(
+            err.to_string(),
+            str![[r#"
+error parsing patchset at line 1, column 1
+  |
+1 | not a patch
+  | ^
+no valid patches found
+"#]]
+        );
+    }
+
+    #[test]
+    fn patches_parse_error_both_dev_null() {
+        let content = "\
+--- /dev/null
++++ /dev/null
+@@ -1 +1 @@
+-old
++new
+";
+        let err: Result<Vec<_>, _> = Patches::parse(content, ParseOptions::unidiff()).collect();
+        let err = err.unwrap_err();
+        assert_data_eq!(
+            err.to_string(),
+            str![[r#"
+error parsing patchset at line 1, column 1
+  |
+1 | --- /dev/null
+  | ^
+patch has both original and modified as /dev/null
+"#]]
+        );
+    }
+
+    #[test]
+    fn patch_parse_error_invalid_hunk_header() {
+        let content = "\
+--- a/file.rs
++++ b/file.rs
+@@ invalid @@
+-old
++new
+";
+        let err = Patch::from_str(content).unwrap_err();
+        assert_data_eq!(
+            err.to_string(),
+            str![[r#"
+error parsing patch at line 3, column 1
+  |
+3 | @@ invalid @@
+  | ^
+unable to parse hunk header
+"#]]
+        );
+    }
+
+    #[test]
+    fn patch_parse_error_hunk_mismatch() {
+        let content = "\
+--- a/file.rs
++++ b/file.rs
+@@ -1,2 +1,2 @@
+-only one line
++only one line
+";
+        let err = Patch::from_str(content).unwrap_err();
+        assert_data_eq!(
+            err.to_string(),
+            str![[r#"
+error parsing patch at line 3, column 1
+  |
+3 | @@ -1,2 +1,2 @@
+  | ^
+hunk header does not match hunk
+"#]]
+        );
+    }
+
+    #[test]
+    fn patch_parse_error_kind_preserved() {
+        let content = "\
+--- a/file.rs
++++ b/file.rs
+@@ invalid @@
+-old
++new
+";
+        let err = Patch::from_str(content).unwrap_err();
+        assert_eq!(err.kind, ParsePatchErrorKind::InvalidHunkHeader);
     }
 }
