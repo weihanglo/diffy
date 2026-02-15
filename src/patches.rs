@@ -25,6 +25,8 @@ pub(crate) enum Format {
     UniDiff,
     /// Git extended diff format.
     GitDiff,
+    /// Auto-detect format from content.
+    Auto,
 }
 
 /// How to handle binary diffs.
@@ -121,6 +123,14 @@ impl ParseOptions {
     pub fn gitdiff() -> Self {
         Self {
             format: Format::GitDiff,
+            binary: Default::default(),
+        }
+    }
+
+    /// Auto-detect format from patch content.
+    pub fn auto() -> Self {
+        Self {
+            format: Format::Auto,
             binary: Default::default(),
         }
     }

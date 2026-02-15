@@ -368,6 +368,24 @@ impl<'a> Iterator for Patches<'a> {
                 }
                 result
             }
+            Format::Auto => {
+                let result = self.next_gitdiff_patch();
+                if result.is_some() {
+                    self.opts.format = Format::GitDiff;
+                    result
+                } else {
+                    self.offset = 0; // Reset to scan from start
+                    self.opts.format = Format::UniDiff;
+                    let result = self.next_unidiff_patch();
+                    if result.is_none() {
+                        self.finished = true;
+                        if !self.found_any {
+                            return Some(Err(self.error(PatchesParseErrorKind::NoPatchesFound)));
+                        }
+                    }
+                    result
+                }
+            }
         };
 
         // Attach input to errors for richer display

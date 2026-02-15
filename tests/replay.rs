@@ -86,18 +86,6 @@ enum CommitSelection {
     Range { from: String, to: String },
 }
 
-/// Strip the first `n` path components from a path.
-fn strip_path_prefix(path: &str, n: usize) -> String {
-    let mut remaining = path;
-    for _ in 0..n {
-        match remaining.split_once('/') {
-            Some((_first, rest)) => remaining = rest,
-            None => return remaining.to_owned(),
-        }
-    }
-    remaining.to_owned()
-}
-
 /// Result of processing a single commit pair.
 struct CommitResult {
     parent_short: String,
@@ -343,45 +331,39 @@ fn process_commit(repo: &PathBuf, parent: &str, child: &str, mode: TestMode) -> 
         // Paths from ---/+++ headers have a/b prefixes that need stripping.
         // Paths from git extended headers (rename/copy) are already clean.
         let operation = file_patch.operation();
+        let strip = match &operation {
+            FileOperation::Rename { .. } | FileOperation::Copy { .. } => 0,
+            _ => 1,
+        };
+        let operation = operation.strip_prefix(strip);
 
-        // Extract path info from operation. Returns (base_path, target_path, desc, strip_prefix).
-        // strip_prefix is 1 for ---/+++ paths (have a/b prefix), 0 for git header paths.
-        let (base_path, target_path, desc, strip): (Option<&str>, Option<&str>, _, _) =
-            match operation {
-                FileOperation::Create(path) => {
-                    (None, Some(path.as_ref()), format!("create {path}"), 1)
-                }
-                FileOperation::Delete(path) => {
-                    (Some(path.as_ref()), None, format!("delete {path}"), 1)
-                }
-                FileOperation::Modify { original, modified } => {
-                    let desc = if original == modified {
-                        format!("modify {original}")
-                    } else {
-                        format!("modify {original} -> {modified}")
-                    };
-                    (Some(original.as_ref()), Some(modified.as_ref()), desc, 1)
-                }
-                // Rename/Copy paths come from git headers WITHOUT a/b prefix
-                FileOperation::Rename { from, to } => (
-                    Some(from.as_ref()),
-                    Some(to.as_ref()),
-                    format!("rename {from} -> {to}"),
-                    0,
-                ),
-                FileOperation::Copy { from, to } => (
-                    Some(from.as_ref()),
-                    Some(to.as_ref()),
-                    format!("copy {from} -> {to}"),
-                    0,
-                ),
-            };
+        let (base_path, target_path, desc): (Option<&str>, Option<&str>, _) = match &operation {
+            FileOperation::Create(path) => (None, Some(path.as_ref()), format!("create {path}")),
+            FileOperation::Delete(path) => (Some(path.as_ref()), None, format!("delete {path}")),
+            FileOperation::Modify { original, modified } => {
+                let desc = if original == modified {
+                    format!("modify {original}")
+                } else {
+                    format!("modify {original} -> {modified}")
+                };
+                (Some(original.as_ref()), Some(modified.as_ref()), desc)
+            }
+            FileOperation::Rename { from, to } => (
+                Some(from.as_ref()),
+                Some(to.as_ref()),
+                format!("rename {from} -> {to}"),
+            ),
+            FileOperation::Copy { from, to } => (
+                Some(from.as_ref()),
+                Some(to.as_ref()),
+                format!("copy {from} -> {to}"),
+            ),
+        };
 
         match file_patch.patch() {
             PatchKind::Text(patch) => {
                 let base_content = if let Some(path) = base_path {
-                    let path = strip_path_prefix(path, strip);
-                    let Some(content) = file_at_commit(repo, parent, &path) else {
+                    let Some(content) = file_at_commit(repo, parent, path) else {
                         skipped += 1;
                         continue;
                     };
@@ -391,8 +373,7 @@ fn process_commit(repo: &PathBuf, parent: &str, child: &str, mode: TestMode) -> 
                 };
 
                 let expected_content = if let Some(path) = target_path {
-                    let path = strip_path_prefix(path, strip);
-                    let Some(content) = file_at_commit(repo, child, &path) else {
+                    let Some(content) = file_at_commit(repo, child, path) else {
                         skipped += 1;
                         continue;
                     };
@@ -429,8 +410,7 @@ fn process_commit(repo: &PathBuf, parent: &str, child: &str, mode: TestMode) -> 
             PatchKind::Binary(patch) => {
                 // Get content as bytes
                 let base_content = if let Some(path) = base_path {
-                    let path = strip_path_prefix(path, strip);
-                    let Some(content) = file_at_commit_bytes(repo, parent, &path) else {
+                    let Some(content) = file_at_commit_bytes(repo, parent, path) else {
                         skipped += 1;
                         continue;
                     };
@@ -440,8 +420,7 @@ fn process_commit(repo: &PathBuf, parent: &str, child: &str, mode: TestMode) -> 
                 };
 
                 let expected_content = if let Some(path) = target_path {
-                    let path = strip_path_prefix(path, strip);
-                    let Some(content) = file_at_commit_bytes(repo, child, &path) else {
+                    let Some(content) = file_at_commit_bytes(repo, child, path) else {
                         skipped += 1;
                         continue;
                     };

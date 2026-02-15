@@ -1456,6 +1456,247 @@ In a hole in the ground there lived a hobbit
     }
 }
 
+/// Tests documenting the behavior of gitdiff vs unidiff mode when given
+/// content in the "wrong" format, and auto-detect mode.
+mod format_behavior {
+    use super::*;
+
+    /// gitdiff mode fails when given pure unified diff (no `diff --git` marker).
+    /// This is expected - gitdiff mode requires the `diff --git` header.
+    #[test]
+    fn gitdiff_mode_on_unified_content_fails() {
+        let unified = "\
+--- a/file.rs
++++ b/file.rs
+@@ -1 +1 @@
+-old
++new
+";
+        let result: Result<Vec<_>, _> = Patches::parse(unified, ParseOptions::gitdiff()).collect();
+        let err = result.unwrap_err();
+        assert!(matches!(err.kind, PatchesParseErrorKind::NoPatchesFound));
+    }
+
+    /// unidiff mode can parse git diff content (the `diff --git` line is ignored
+    /// as preamble, and `---`/`+++` lines are used as patch boundaries).
+    #[test]
+    fn unidiff_mode_on_gitdiff_content_works() {
+        let gitdiff = "\
+diff --git a/file.rs b/file.rs
+--- a/file.rs
++++ b/file.rs
+@@ -1 +1 @@
+-old
++new
+";
+        let patches: Vec<_> = Patches::parse(gitdiff, ParseOptions::unidiff())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
+    }
+
+    /// unidiff mode loses git-specific metadata like mode changes.
+    /// The patch is still parsed but mode information is not available.
+    #[test]
+    fn unidiff_mode_loses_mode_changes() {
+        let gitdiff = "\
+diff --git a/script.sh b/script.sh
+old mode 100644
+new mode 100755
+--- a/script.sh
++++ b/script.sh
+@@ -1 +1 @@
+-old
++new
+";
+        let patches: Vec<_> = Patches::parse(gitdiff, ParseOptions::unidiff())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
+        // Mode information is lost in unidiff mode
+        assert_eq!(patches[0].old_mode(), None);
+        assert_eq!(patches[0].new_mode(), None);
+    }
+
+    /// unidiff mode cannot parse pure rename operations (no hunks).
+    /// A pure rename in git has no `---`/`+++` lines, so unidiff mode doesn't see it.
+    #[test]
+    fn unidiff_mode_misses_pure_rename() {
+        let gitdiff = "\
+diff --git a/old.txt b/new.txt
+similarity index 100%
+rename from old.txt
+rename to new.txt
+";
+        let result: Result<Vec<_>, _> = Patches::parse(gitdiff, ParseOptions::unidiff()).collect();
+        let err = result.unwrap_err();
+        // No `---`/`+++` boundary means no patch found
+        assert!(matches!(err.kind, PatchesParseErrorKind::NoPatchesFound));
+    }
+
+    /// unidiff mode can parse git format-patch output (email headers are stripped
+    /// as preamble).
+    #[test]
+    fn unidiff_mode_on_format_patch_content_works() {
+        let format_patch = "\
+From abc123 Mon Sep 17 00:00:00 2001
+From: User <user@example.com>
+Subject: [PATCH] Fix something
+---
+ file.rs | 1 +
+
+diff --git a/file.rs b/file.rs
+--- a/file.rs
++++ b/file.rs
+@@ -1 +1 @@
+-old
++new
+";
+        let patches: Vec<_> = Patches::parse(format_patch, ParseOptions::unidiff())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
+    }
+
+    /// auto mode detects and uses gitdiff for git diff content.
+    #[test]
+    fn auto_mode_on_gitdiff_content() {
+        let gitdiff = "\
+diff --git a/file.rs b/file.rs
+--- a/file.rs
++++ b/file.rs
+@@ -1 +1 @@
+-old
++new
+";
+        let patches: Vec<_> = Patches::parse(gitdiff, ParseOptions::auto())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
+    }
+
+    /// auto mode falls back to unidiff when no `diff --git` marker.
+    #[test]
+    fn auto_mode_on_unified_content() {
+        let unified = "\
+--- a/file.rs
++++ b/file.rs
+@@ -1 +1 @@
+-old
++new
+";
+        let patches: Vec<_> = Patches::parse(unified, ParseOptions::auto())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
+    }
+
+    /// auto mode handles git format-patch with email preamble.
+    #[test]
+    fn auto_mode_on_format_patch() {
+        let format_patch = "\
+From abc123 Mon Sep 17 00:00:00 2001
+From: User <user@example.com>
+Subject: [PATCH] Fix something
+---
+ file.rs | 1 +
+
+diff --git a/file.rs b/file.rs
+--- a/file.rs
++++ b/file.rs
+@@ -1 +1 @@
+-old
++new
+";
+        let patches: Vec<_> = Patches::parse(format_patch, ParseOptions::auto())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
+    }
+
+    /// auto mode preserves git-specific metadata (mode changes) when using gitdiff.
+    #[test]
+    fn auto_mode_preserves_mode_changes() {
+        let gitdiff = "\
+diff --git a/script.sh b/script.sh
+old mode 100644
+new mode 100755
+--- a/script.sh
++++ b/script.sh
+@@ -1 +1 @@
+-old
++new
+";
+        let patches: Vec<_> = Patches::parse(gitdiff, ParseOptions::auto())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
+        // Mode information is preserved in auto mode (uses gitdiff)
+        assert_eq!(patches[0].old_mode(), Some(&FileMode::Regular));
+        assert_eq!(patches[0].new_mode(), Some(&FileMode::Executable));
+    }
+
+    /// auto mode can parse pure rename (only possible via gitdiff detection).
+    #[test]
+    fn auto_mode_handles_pure_rename() {
+        let gitdiff = "\
+diff --git a/old.txt b/new.txt
+similarity index 100%
+rename from old.txt
+rename to new.txt
+";
+        let patches: Vec<_> = Patches::parse(gitdiff, ParseOptions::auto())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
+        assert!(patches[0].operation().is_rename());
+    }
+
+    /// auto mode handles multiple patches in git diff format.
+    #[test]
+    fn auto_mode_multi_file_gitdiff() {
+        let gitdiff = "\
+diff --git a/file1.rs b/file1.rs
+--- a/file1.rs
++++ b/file1.rs
+@@ -1 +1 @@
+-old1
++new1
+diff --git a/file2.rs b/file2.rs
+--- a/file2.rs
++++ b/file2.rs
+@@ -1 +1 @@
+-old2
++new2
+";
+        let patches: Vec<_> = Patches::parse(gitdiff, ParseOptions::auto())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 2);
+    }
+
+    /// auto mode handles multiple patches in unified diff format.
+    #[test]
+    fn auto_mode_multi_file_unified() {
+        let unified = "\
+--- a/file1.rs
++++ b/file1.rs
+@@ -1 +1 @@
+-old1
++new1
+--- a/file2.rs
++++ b/file2.rs
+@@ -1 +1 @@
+-old2
++new2
+";
+        let patches: Vec<_> = Patches::parse(unified, ParseOptions::auto())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 2);
+    }
+}
+
 mod error_display {
     use super::*;
     use crate::patch::error::ParsePatchErrorKind;
