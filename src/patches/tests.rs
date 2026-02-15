@@ -1456,6 +1456,109 @@ In a hole in the ground there lived a hobbit
     }
 }
 
+/// Tests documenting the behavior of gitdiff vs unidiff mode when given
+/// content in the "wrong" format.
+mod format_behavior {
+    use super::*;
+
+    /// gitdiff mode fails when given pure unified diff (no `diff --git` marker).
+    /// This is expected - gitdiff mode requires the `diff --git` header.
+    #[test]
+    fn gitdiff_mode_on_unified_content_fails() {
+        let unified = "\
+--- a/file.rs
++++ b/file.rs
+@@ -1 +1 @@
+-old
++new
+";
+        let result: Result<Vec<_>, _> = Patches::parse(unified, ParseOptions::gitdiff()).collect();
+        let err = result.unwrap_err();
+        assert!(matches!(err.kind, PatchesParseErrorKind::NoPatchesFound));
+    }
+
+    /// unidiff mode can parse git diff content (the `diff --git` line is ignored
+    /// as preamble, and `---`/`+++` lines are used as patch boundaries).
+    #[test]
+    fn unidiff_mode_on_gitdiff_content_works() {
+        let gitdiff = "\
+diff --git a/file.rs b/file.rs
+--- a/file.rs
++++ b/file.rs
+@@ -1 +1 @@
+-old
++new
+";
+        let patches: Vec<_> = Patches::parse(gitdiff, ParseOptions::unidiff())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
+    }
+
+    /// unidiff mode loses git-specific metadata like mode changes.
+    /// The patch is still parsed but mode information is not available.
+    #[test]
+    fn unidiff_mode_loses_mode_changes() {
+        let gitdiff = "\
+diff --git a/script.sh b/script.sh
+old mode 100644
+new mode 100755
+--- a/script.sh
++++ b/script.sh
+@@ -1 +1 @@
+-old
++new
+";
+        let patches: Vec<_> = Patches::parse(gitdiff, ParseOptions::unidiff())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
+        // Mode information is lost in unidiff mode
+        assert_eq!(patches[0].old_mode(), None);
+        assert_eq!(patches[0].new_mode(), None);
+    }
+
+    /// unidiff mode cannot parse pure rename operations (no hunks).
+    /// A pure rename in git has no `---`/`+++` lines, so unidiff mode doesn't see it.
+    #[test]
+    fn unidiff_mode_misses_pure_rename() {
+        let gitdiff = "\
+diff --git a/old.txt b/new.txt
+similarity index 100%
+rename from old.txt
+rename to new.txt
+";
+        let result: Result<Vec<_>, _> = Patches::parse(gitdiff, ParseOptions::unidiff()).collect();
+        let err = result.unwrap_err();
+        // No `---`/`+++` boundary means no patch found
+        assert!(matches!(err.kind, PatchesParseErrorKind::NoPatchesFound));
+    }
+
+    /// unidiff mode can parse git format-patch output (email headers are stripped
+    /// as preamble).
+    #[test]
+    fn unidiff_mode_on_format_patch_content_works() {
+        let format_patch = "\
+From abc123 Mon Sep 17 00:00:00 2001
+From: User <user@example.com>
+Subject: [PATCH] Fix something
+---
+ file.rs | 1 +
+
+diff --git a/file.rs b/file.rs
+--- a/file.rs
++++ b/file.rs
+@@ -1 +1 @@
+-old
++new
+";
+        let patches: Vec<_> = Patches::parse(format_patch, ParseOptions::unidiff())
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(patches.len(), 1);
+    }
+}
+
 mod error_display {
     use super::*;
     use crate::patch::error::ParsePatchErrorKind;
