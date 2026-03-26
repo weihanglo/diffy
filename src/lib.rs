@@ -20,9 +20,10 @@
 //! ## UTF-8 and Non-UTF-8
 //!
 //! This library has support for working with both utf8 and non-utf8 texts.
-//! Most of the API's have two different variants, one for working with utf8
+//! The single-file APIs have two variants, one for working with utf8
 //! `str` texts (e.g. [`create_patch`]) and one for working with bytes `[u8]`
-//! which may or may not be utf8 (e.g. [`create_patch_bytes`]).
+//! which may or may not be utf8 (e.g. [`create_patch_bytes`]). The
+//! multi-file [`patches`] module currently works with UTF-8 input only.
 //!
 //! ## Creating a Patch
 //!
