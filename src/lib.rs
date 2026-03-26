@@ -145,6 +145,62 @@
 //! assert_eq!(apply(base_image, &patch).unwrap(), expected);
 //! ```
 //!
+//! ## Parsing Multi-File Patches
+//!
+//! The [`patches`] module handles patches that contain changes to multiple
+//! files, such as the output of `git diff` or `git format-patch`. The
+//! [`Patches`] streaming iterator parses individual [`FilePatch`]es from
+//! the input. Use [`ParseOptions::gitdiff()`] for `git diff` output with
+//! extended headers (rename, copy, mode changes, binary),
+//! [`ParseOptions::unidiff()`] for standard [Unified Format] diffs, or
+//! [`ParseOptions::auto()`] to auto-detect the format.
+//!
+//! ```
+//! use diffy::patches::{Patches, ParseOptions, FileOperation};
+//!
+//! let diff = "\
+//! diff --git a/src/main.rs b/src/main.rs
+//! --- a/src/main.rs
+//! +++ b/src/main.rs
+//! @@ -1,2 +1,3 @@
+//!  fn main() {
+//! +    println!(\"hello\");
+//!  }
+//! diff --git a/README.md b/README.md
+//! new file mode 100644
+//! --- /dev/null
+//! +++ b/README.md
+//! @@ -0,0 +1 @@
+//! +# My Project
+//! ";
+//!
+//! let patches: Vec<_> = Patches::parse(diff, ParseOptions::gitdiff())
+//!     .collect::<Result<_, _>>()
+//!     .unwrap();
+//!
+//! assert_eq!(patches.len(), 2);
+//!
+//! // Inspect the file operation and strip the a/b prefix (like `patch -p1`)
+//! let op = patches[0].operation().strip_prefix(1);
+//! assert!(op.is_modify());
+//!
+//! let op = patches[1].operation().strip_prefix(1);
+//! assert!(op.is_create());
+//!
+//! // Apply individual text patches
+//! if let Some(patch) = patches[0].patch().as_text() {
+//!     let base = "fn main() {\n}\n";
+//!     let result = diffy::apply(base, patch).unwrap();
+//!     assert_eq!(result, "fn main() {\n    println!(\"hello\");\n}\n");
+//! }
+//! ```
+//!
+//! With the `binary` [Cargo feature] enabled, binary patches from
+//! `git diff --binary` can also be parsed and applied via
+//! [`BinaryPatch::apply()`]. By default binary diffs are kept in the
+//! output; use [`ParseOptions::skip_binary()`] to silently skip them or
+//! [`ParseOptions::fail_on_binary()`] to return an error.
+//!
 //! ## Performing a Three-way Merge
 //!
 //! Two files `A` and `B` can be merged together given a common ancestor or
@@ -208,6 +264,7 @@
 //! assert_eq!(merge(original, a, b).unwrap_err(), expected);
 //! ```
 //!
+//! [Cargo feature]: https://doc.rust-lang.org/cargo/reference/features.html
 //! [LibXDiff]: http://www.xmailserver.org/xdiff-lib.html
 //! [Myers' diff algorithm]: http://www.xmailserver.org/diff2.pdf
 //! [GNU Diffutils]: https://www.gnu.org/software/diffutils/
@@ -221,6 +278,15 @@
 //! [`PatchFormatter`]: struct.PatchFormatter.html
 //! [`create_patch`]: fn.create_patch.html
 //! [`create_patch_bytes`]: fn.create_patch_bytes.html
+//! [`patches`]: patches/index.html
+//! [`Patches`]: patches/struct.Patches.html
+//! [`FilePatch`]: patches/struct.FilePatch.html
+//! [`ParseOptions::gitdiff()`]: patches/struct.ParseOptions.html#method.gitdiff
+//! [`ParseOptions::unidiff()`]: patches/struct.ParseOptions.html#method.unidiff
+//! [`ParseOptions::auto()`]: patches/struct.ParseOptions.html#method.auto
+//! [`ParseOptions::skip_binary()`]: patches/struct.ParseOptions.html#method.skip_binary
+//! [`ParseOptions::fail_on_binary()`]: patches/struct.ParseOptions.html#method.fail_on_binary
+//! [`BinaryPatch::apply()`]: binary/enum.BinaryPatch.html#method.apply
 
 mod apply;
 pub mod binary;
