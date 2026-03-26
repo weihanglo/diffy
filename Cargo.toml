@@ -37,5 +37,8 @@ required-features = ["binary"]
 rayon = "1.10"
 snapbox = { version = "0.6.24", features = ["dir"] }
 
+[package.metadata.docs.rs]
+all-features = true
+
 [lints.clippy]
 mod_module_files = "deny"

@@ -273,20 +273,20 @@
 //! [Unified Format]: https://en.wikipedia.org/wiki/Diff#Unified_format
 //! [diff3]: https://en.wikipedia.org/wiki/Diff3
 //!
-//! [`Display`]: https://doc.rust-lang.org/stable/std/fmt/trait.Display.html
-//! [`Patch`]: struct.Patch.html
-//! [`PatchFormatter`]: struct.PatchFormatter.html
-//! [`create_patch`]: fn.create_patch.html
-//! [`create_patch_bytes`]: fn.create_patch_bytes.html
-//! [`patches`]: patches/index.html
-//! [`Patches`]: patches/struct.Patches.html
-//! [`FilePatch`]: patches/struct.FilePatch.html
-//! [`ParseOptions::gitdiff()`]: patches/struct.ParseOptions.html#method.gitdiff
-//! [`ParseOptions::unidiff()`]: patches/struct.ParseOptions.html#method.unidiff
-//! [`ParseOptions::auto()`]: patches/struct.ParseOptions.html#method.auto
-//! [`ParseOptions::skip_binary()`]: patches/struct.ParseOptions.html#method.skip_binary
-//! [`ParseOptions::fail_on_binary()`]: patches/struct.ParseOptions.html#method.fail_on_binary
-//! [`BinaryPatch::apply()`]: binary/enum.BinaryPatch.html#method.apply
+//! [`Display`]: std::fmt::Display
+//! [`Patch`]: crate::Patch
+//! [`PatchFormatter`]: crate::PatchFormatter
+//! [`create_patch`]: crate::create_patch
+//! [`create_patch_bytes`]: crate::create_patch_bytes
+//! [`patches`]: crate::patches
+//! [`Patches`]: crate::patches::Patches
+//! [`FilePatch`]: crate::patches::FilePatch
+//! [`ParseOptions::gitdiff()`]: crate::patches::ParseOptions::gitdiff
+//! [`ParseOptions::unidiff()`]: crate::patches::ParseOptions::unidiff
+//! [`ParseOptions::auto()`]: crate::patches::ParseOptions::auto
+//! [`ParseOptions::skip_binary()`]: crate::patches::ParseOptions::skip_binary
+//! [`ParseOptions::fail_on_binary()`]: crate::patches::ParseOptions::fail_on_binary
+//! [`BinaryPatch::apply()`]: crate::binary::BinaryPatch::apply
 
 mod apply;
 pub mod binary;
