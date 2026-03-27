@@ -20,9 +20,10 @@
 //! ## UTF-8 and Non-UTF-8
 //!
 //! This library has support for working with both utf8 and non-utf8 texts.
-//! Most of the API's have two different variants, one for working with utf8
+//! The single-file APIs have two variants, one for working with utf8
 //! `str` texts (e.g. [`create_patch`]) and one for working with bytes `[u8]`
-//! which may or may not be utf8 (e.g. [`create_patch_bytes`]).
+//! which may or may not be utf8 (e.g. [`create_patch_bytes`]). The
+//! multi-file [`patches`] module currently works with UTF-8 input only.
 //!
 //! ## Creating a Patch
 //!
@@ -145,6 +146,62 @@
 //! assert_eq!(apply(base_image, &patch).unwrap(), expected);
 //! ```
 //!
+//! ## Parsing Multi-File Patches
+//!
+//! The [`patches`] module handles patches that contain changes to multiple
+//! files, such as the output of `git diff` or `git format-patch`. The
+//! [`Patches`] streaming iterator parses individual [`FilePatch`]es from
+//! the input. Use [`ParseOptions::gitdiff()`] for `git diff` output with
+//! extended headers (rename, copy, mode changes, binary),
+//! [`ParseOptions::unidiff()`] for standard [Unified Format] diffs, or
+//! [`ParseOptions::auto()`] to auto-detect the format.
+//!
+//! ```
+//! use diffy::patches::{Patches, ParseOptions, FileOperation};
+//!
+//! let diff = "\
+//! diff --git a/src/main.rs b/src/main.rs
+//! --- a/src/main.rs
+//! +++ b/src/main.rs
+//! @@ -1,2 +1,3 @@
+//!  fn main() {
+//! +    println!(\"hello\");
+//!  }
+//! diff --git a/README.md b/README.md
+//! new file mode 100644
+//! --- /dev/null
+//! +++ b/README.md
+//! @@ -0,0 +1 @@
+//! +# My Project
+//! ";
+//!
+//! let patches: Vec<_> = Patches::parse(diff, ParseOptions::gitdiff())
+//!     .collect::<Result<_, _>>()
+//!     .unwrap();
+//!
+//! assert_eq!(patches.len(), 2);
+//!
+//! // Inspect the file operation and strip the a/b prefix (like `patch -p1`)
+//! let op = patches[0].operation().strip_prefix(1);
+//! assert!(op.is_modify());
+//!
+//! let op = patches[1].operation().strip_prefix(1);
+//! assert!(op.is_create());
+//!
+//! // Apply individual text patches
+//! if let Some(patch) = patches[0].patch().as_text() {
+//!     let base = "fn main() {\n}\n";
+//!     let result = diffy::apply(base, patch).unwrap();
+//!     assert_eq!(result, "fn main() {\n    println!(\"hello\");\n}\n");
+//! }
+//! ```
+//!
+//! With the `binary` [Cargo feature] enabled, binary patches from
+//! `git diff --binary` can also be parsed and applied via
+//! [`BinaryPatch::apply()`]. By default binary diffs are kept in the
+//! output; use [`ParseOptions::skip_binary()`] to silently skip them or
+//! [`ParseOptions::fail_on_binary()`] to return an error.
+//!
 //! ## Performing a Three-way Merge
 //!
 //! Two files `A` and `B` can be merged together given a common ancestor or
@@ -208,6 +265,7 @@
 //! assert_eq!(merge(original, a, b).unwrap_err(), expected);
 //! ```
 //!
+//! [Cargo feature]: https://doc.rust-lang.org/cargo/reference/features.html
 //! [LibXDiff]: http://www.xmailserver.org/xdiff-lib.html
 //! [Myers' diff algorithm]: http://www.xmailserver.org/diff2.pdf
 //! [GNU Diffutils]: https://www.gnu.org/software/diffutils/
@@ -216,11 +274,20 @@
 //! [Unified Format]: https://en.wikipedia.org/wiki/Diff#Unified_format
 //! [diff3]: https://en.wikipedia.org/wiki/Diff3
 //!
-//! [`Display`]: https://doc.rust-lang.org/stable/std/fmt/trait.Display.html
-//! [`Patch`]: struct.Patch.html
-//! [`PatchFormatter`]: struct.PatchFormatter.html
-//! [`create_patch`]: fn.create_patch.html
-//! [`create_patch_bytes`]: fn.create_patch_bytes.html
+//! [`Display`]: std::fmt::Display
+//! [`Patch`]: crate::Patch
+//! [`PatchFormatter`]: crate::PatchFormatter
+//! [`create_patch`]: crate::create_patch
+//! [`create_patch_bytes`]: crate::create_patch_bytes
+//! [`patches`]: crate::patches
+//! [`Patches`]: crate::patches::Patches
+//! [`FilePatch`]: crate::patches::FilePatch
+//! [`ParseOptions::gitdiff()`]: crate::patches::ParseOptions::gitdiff
+//! [`ParseOptions::unidiff()`]: crate::patches::ParseOptions::unidiff
+//! [`ParseOptions::auto()`]: crate::patches::ParseOptions::auto
+//! [`ParseOptions::skip_binary()`]: crate::patches::ParseOptions::skip_binary
+//! [`ParseOptions::fail_on_binary()`]: crate::patches::ParseOptions::fail_on_binary
+//! [`BinaryPatch::apply()`]: crate::binary::BinaryPatch::apply
 
 mod apply;
 pub mod binary;
