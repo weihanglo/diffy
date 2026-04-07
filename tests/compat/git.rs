@@ -18,6 +18,45 @@ fn path_quoted_escapes() {
     Case::git("path_quoted_escapes").strip(1).run();
 }
 
+// Git uses C-style named escapes (\a, \b, \f, \v) for certain control
+// characters in quoted filenames. Both `git apply` and GNU patch decode
+// these correctly.
+//
+// Observed with git 2.53.0:
+//   $ printf 'x' > "$(printf 'bel\a')" && git add -A
+//   $ git diff --cached | grep '+++'
+//   +++ "b/bel\a"
+//
+// diffy now decodes these correctly.
+#[test]
+fn path_quoted_named_escape() {
+    Case::git("path_quoted_named_escape").strip(1).run();
+}
+
+// Git uses 3-digit octal escapes (\000–\377) for bytes that don't have
+// a named escape. Both `git apply` and GNU patch decode these correctly.
+//
+// Observed with git 2.53.0:
+//   $ printf 'x' > "$(printf 'tl\033')" && git add -A
+//   $ git diff --cached | grep '+++'
+//   +++ "b/tl\033"
+//
+// Observed with GNU patch 2.7.1:
+//   $ patch -p1 < test.patch
+//   patching file tl<ESC>
+//
+// diffy currently misparsed \033: the \0 is consumed as a standalone NUL
+// byte, leaving "33" as literal characters. This produces a filename with
+// an embedded NUL, which is invalid on all major filesystems.
+//
+// Found via full-history replay test against llvm/llvm-project
+// (commits 17af06ba..229c95ab, 6c031780..0683a1e5).
+//
+#[test]
+fn path_quoted_octal_escape() {
+    Case::git("path_quoted_octal_escape").strip(1).run();
+}
+
 #[test]
 fn path_with_spaces() {
     Case::git("path_with_spaces").strip(1).run();

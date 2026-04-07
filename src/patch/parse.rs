@@ -543,7 +543,7 @@ trailing garbage
         // quoted with escaped characters
         let s = r#"\
 --- "ori\"g\tinal"
-+++ "mo\0\t\r\n\\dified"
++++ "mo\000\t\r\n\\dified"
 @@ -1,0 +1,1 @@
 +Oathbringer
 "#;
@@ -553,6 +553,121 @@ trailing garbage
         let b = parse_bytes(s.as_ref()).unwrap();
         assert_eq!(b.original(), Some(&b"ori\"g\tinal"[..]));
         assert_eq!(b.modified(), Some(&b"mo\0\t\r\n\\dified"[..]));
+    }
+
+    // Git uses named escapes \a (BEL), \b (BS), \f (FF), \v (VT) in
+    // quoted filenames. Both `git apply` and GNU patch decode them.
+    //
+    // Observed with git 2.53.0:
+    //   $ printf 'x' > "$(printf 'f\x07')" && git add -A
+    //   $ git diff --cached --name-only
+    //   "f\a"
+    //
+    // Observed with GNU patch 2.7.1:
+    //   $ patch -p0 < test.patch   # with +++ "bel\a"
+    //   patching file bel<BEL>
+    #[test]
+    fn escaped_filename_named_escapes() {
+        let cases: &[(&str, u8)] = &[
+            ("\\a", b'\x07'),
+            ("\\b", b'\x08'),
+            ("\\f", b'\x0c'),
+            ("\\v", b'\x0b'),
+        ];
+        for (esc, expected_byte) in cases {
+            let s = format!(
+                "\
+--- \"orig{esc}\"
++++ \"mod{esc}\"
+@@ -1,0 +1,1 @@
++content
+"
+            );
+            let p = parse(&s).unwrap();
+            let expected_orig = format!("orig{}", *expected_byte as char);
+            let expected_mod = format!("mod{}", *expected_byte as char);
+            assert_eq!(p.original(), Some(expected_orig.as_str()));
+            assert_eq!(p.modified(), Some(expected_mod.as_str()));
+        }
+    }
+
+    // Git uses 3-digit octal escapes (\000–\377) for bytes without a
+    // named escape. Both `git apply` and GNU patch decode them.
+    //
+    // Observed with git 2.53.0:
+    //   $ printf 'x' > "$(printf 'f\033')" && git add -A
+    //   $ git diff --cached | grep '+++'
+    //   +++ "b/f\033"
+    //
+    // Observed with GNU patch 2.7.1:
+    //   $ patch -p1 < test.patch   # with +++ "b/tl\033"
+    //   patching file tl<ESC>
+    //
+    // Found via llvm/llvm-project full-history replay
+    // (commits 17af06ba..229c95ab, 6c031780..0683a1e5).
+    #[test]
+    fn escaped_filename_octal() {
+        // \033 = ESC (0x1B)
+        let s = r#"\
+--- "orig\033"
++++ "mod\033"
+@@ -1,0 +1,1 @@
++content
+"#;
+        let p = parse(s).unwrap();
+        assert_eq!(p.original(), Some("orig\x1b"));
+        assert_eq!(p.modified(), Some("mod\x1b"));
+
+        // \000 = NUL
+        let s = r#"\
+--- "orig\000"
++++ "mod\000"
+@@ -1,0 +1,1 @@
++content
+"#;
+        let p = parse(s).unwrap();
+        assert_eq!(p.original(), Some("orig\x00"));
+        assert_eq!(p.modified(), Some("mod\x00"));
+
+        // \177 = DEL (0x7F)
+        let s = r#"\
+--- "orig\177"
++++ "mod\177"
+@@ -1,0 +1,1 @@
++content
+"#;
+        let p = parse(s).unwrap();
+        assert_eq!(p.original(), Some("orig\x7f"));
+        assert_eq!(p.modified(), Some("mod\x7f"));
+
+        // \377 = 0xFF
+        let s = r#"\
+--- "orig\377"
++++ "mod\377"
+@@ -1,0 +1,1 @@
++content
+"#;
+        let b = parse_bytes(s.as_ref()).unwrap();
+        assert_eq!(b.original(), Some(&b"orig\xff"[..]));
+        assert_eq!(b.modified(), Some(&b"mod\xff"[..]));
+
+        // Truncated octal (only 2 digits) → error
+        let s = r#"\
+--- "orig\03"
++++ "mod\03"
+@@ -1,0 +1,1 @@
++content
+"#;
+        parse(s).unwrap_err();
+
+        // Non-octal digit in second position → error
+        let s = r#"\
+--- "orig\08x"
++++ "mod\08x"
+@@ -1,0 +1,1 @@
++content
+"#;
+        parse(s).unwrap_err();
     }
 
     #[test]

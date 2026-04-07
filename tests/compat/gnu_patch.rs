@@ -14,6 +14,33 @@ fn create_file() {
     Case::gnu_patch("create_file").run();
 }
 
+// GNU patch decodes C-style named escapes (\a, \b, \f, \v) in quoted
+// filenames in ---/+++ headers.
+//
+// Observed with GNU patch 2.7.1:
+//   $ patch -p0 < test.patch   # with +++ "bel\a"
+//   patching file bel<BEL>
+//
+// diffy now decodes these correctly.
+#[test]
+fn path_quoted_named_escape() {
+    Case::gnu_patch("path_quoted_named_escape").run();
+}
+
+// GNU patch decodes 3-digit octal escapes (\000–\377) in quoted filenames.
+//
+// Observed with GNU patch 2.7.1:
+//   $ patch -p0 < test.patch   # with +++ "tl\033"
+//   patching file tl<ESC>
+//
+// diffy currently misparsed \033: the \0 is consumed as a standalone NUL
+// byte, leaving "33" as literal characters.
+//
+#[test]
+fn path_quoted_octal_escape() {
+    Case::gnu_patch("path_quoted_octal_escape").run();
+}
+
 #[test]
 fn reversed_header_order() {
     Case::gnu_patch("reversed_header_order").run();
