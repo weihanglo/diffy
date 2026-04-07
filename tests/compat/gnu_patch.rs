@@ -14,6 +14,22 @@ fn create_file() {
     Case::gnu_patch("create_file").run();
 }
 
+// GNU patch decodes C-style named escapes (\a, \b, \f, \v) in quoted
+// filenames in ---/+++ headers.
+//
+// Observed with GNU patch 2.7.1:
+//   $ patch -p0 < test.patch   # with +++ "bel\a"
+//   patching file bel<BEL>
+//
+// diffy currently rejects \a as InvalidEscapedChar.
+#[test]
+fn path_quoted_named_escape() {
+    Case::gnu_patch("path_quoted_named_escape")
+        .expect_success(false)
+        .expect_compat(false)
+        .run();
+}
+
 #[test]
 fn reversed_header_order() {
     Case::gnu_patch("reversed_header_order").run();

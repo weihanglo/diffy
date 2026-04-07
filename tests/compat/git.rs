@@ -18,6 +18,25 @@ fn path_quoted_escapes() {
     Case::git("path_quoted_escapes").strip(1).run();
 }
 
+// Git uses C-style named escapes (\a, \b, \f, \v) for certain control
+// characters in quoted filenames. Both `git apply` and GNU patch decode
+// these correctly.
+//
+// Observed with git 2.53.0:
+//   $ printf 'x' > "$(printf 'bel\a')" && git add -A
+//   $ git diff --cached | grep '+++'
+//   +++ "b/bel\a"
+//
+// diffy currently rejects \a as InvalidEscapedChar.
+#[test]
+fn path_quoted_named_escape() {
+    Case::git("path_quoted_named_escape")
+        .strip(1)
+        .expect_success(false)
+        .expect_compat(false)
+        .run();
+}
+
 #[test]
 fn path_with_spaces() {
     Case::git("path_with_spaces").strip(1).run();
