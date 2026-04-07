@@ -343,9 +343,21 @@ fn _escaped_filename<T: Text + ToOwned + ?Sized>(
                 b'v' => b'\x0b',
                 b'f' => b'\x0c',
                 b'r' => b'\r',
-                b'0' => b'\0',
                 b'\"' => b'\"',
                 b'\\' => b'\\',
+                // 3-digit octal: \0xx through \3xx (values 0x00–0xFF)
+                c @ b'0'..=b'3' => {
+                    if i + 2 >= bytes.len() {
+                        return Err(ParsePatchErrorKind::InvalidEscapedChar.into());
+                    }
+                    let d1 = bytes[i + 1];
+                    let d2 = bytes[i + 2];
+                    if !(b'0'..=b'7').contains(&d1) || !(b'0'..=b'7').contains(&d2) {
+                        return Err(ParsePatchErrorKind::InvalidEscapedChar.into());
+                    }
+                    i += 2;
+                    (c - b'0') << 6 | (d1 - b'0') << 3 | (d2 - b'0')
+                }
                 _ => return Err(ParsePatchErrorKind::InvalidEscapedChar.into()),
             };
             result.push(decoded);
