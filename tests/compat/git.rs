@@ -27,14 +27,10 @@ fn path_quoted_escapes() {
 //   $ git diff --cached | grep '+++'
 //   +++ "b/bel\a"
 //
-// diffy currently rejects \a as InvalidEscapedChar.
+// diffy now decodes these correctly.
 #[test]
 fn path_quoted_named_escape() {
-    Case::git("path_quoted_named_escape")
-        .strip(1)
-        .expect_success(false)
-        .expect_compat(false)
-        .run();
+    Case::git("path_quoted_named_escape").strip(1).run();
 }
 
 #[test]

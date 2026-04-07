@@ -21,13 +21,10 @@ fn create_file() {
 //   $ patch -p0 < test.patch   # with +++ "bel\a"
 //   patching file bel<BEL>
 //
-// diffy currently rejects \a as InvalidEscapedChar.
+// diffy now decodes these correctly.
 #[test]
 fn path_quoted_named_escape() {
-    Case::gnu_patch("path_quoted_named_escape")
-        .expect_success(false)
-        .expect_compat(false)
-        .run();
+    Case::gnu_patch("path_quoted_named_escape").run();
 }
 
 #[test]

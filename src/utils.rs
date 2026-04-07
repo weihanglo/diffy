@@ -9,11 +9,15 @@ use crate::patch::error::ParsePatchErrorKind;
 use crate::ParsePatchError;
 
 /// Characters that require escaping in filenames.
-pub const ESCAPED_CHARS: &[char] = &['\n', '\t', '\0', '\r', '\"', '\\'];
+pub const ESCAPED_CHARS: &[char] = &[
+    '\x07', '\x08', '\t', '\n', '\x0b', '\x0c', '\r', '\0', '\"', '\\',
+];
 
 /// Like [`ESCAPED_CHARS`] but in byte representation.
 #[allow(clippy::byte_char_slices)]
-pub const ESCAPED_CHARS_BYTES: &[u8] = &[b'\n', b'\t', b'\0', b'\r', b'\"', b'\\'];
+pub const ESCAPED_CHARS_BYTES: &[u8] = &[
+    b'\x07', b'\x08', b'\t', b'\n', b'\x0b', b'\x0c', b'\r', b'\0', b'\"', b'\\',
+];
 
 /// Classifies lines, converting lines into unique `u64`s for quicker comparison
 pub struct Classifier<'a, T: ?Sized> {
@@ -332,10 +336,14 @@ fn _escaped_filename<T: Text + ToOwned + ?Sized>(
             }
 
             let decoded = match bytes[i] {
+                b'a' => b'\x07',
+                b'b' => b'\x08',
                 b'n' => b'\n',
                 b't' => b'\t',
-                b'0' => b'\0',
+                b'v' => b'\x0b',
+                b'f' => b'\x0c',
                 b'r' => b'\r',
+                b'0' => b'\0',
                 b'\"' => b'\"',
                 b'\\' => b'\\',
                 _ => return Err(ParsePatchErrorKind::InvalidEscapedChar.into()),
