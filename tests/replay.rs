@@ -240,6 +240,37 @@ fn commit_history(repo: &PathBuf, selection: &CommitSelection) -> Vec<String> {
     }
 }
 
+/// Count type-change entries (`T` status) in `git diff --raw` output.
+///
+/// Type changes (e.g., symlink → regular file) produce two patches
+/// (delete + create) but only one `--raw` line.
+///
+/// Example from llvm/llvm-project 3fa3e65d..caaaf2ee:
+///
+/// ```text
+/// $ git diff --raw 3fa3e65d caaaf2ee
+/// :120000 100644 ca10bf54 dda5db9c T	clang/tools/scan-build/c++-analyzer
+/// :100755 100755 2b07d6b6 35f852e7 M	clang/tools/scan-build/scan-build
+/// :000000 100644 00000000 77be6746 A	clang/tools/scan-build/scan-build.bat
+/// ```
+///
+/// The `T` entry (symlink 120000 → regular file 100644) produces two
+/// patches in `git diff` output, while `M` and `A` produce one each.
+///
+/// See <https://git-scm.com/docs/diff-format#_raw_output_format> for
+/// the `--raw` format specification.
+fn count_type_changes(raw: &str) -> usize {
+    raw.lines()
+        .filter(|l| !l.is_empty())
+        .filter(|line| {
+            // --raw format: `:old_mode new_mode old_hash new_hash status\tpath`
+            line.split('\t')
+                .next()
+                .is_some_and(|meta| meta.ends_with(" T"))
+        })
+        .count()
+}
+
 fn process_commit(repo: &PathBuf, parent: &str, child: &str, mode: TestMode) -> CommitResult {
     let parent_short = parent[..8].to_string();
     let child_short = child[..8].to_string();
@@ -268,6 +299,12 @@ fn process_commit(repo: &PathBuf, parent: &str, child: &str, mode: TestMode) -> 
 
     // Calculate expected file count BEFORE parsing.
     // This allows early return for binary-only commits.
+    //
+    // Type changes (status `T`, e.g., symlink → regular file) produce two
+    // patches (delete + create) for one `--raw`/`--numstat` entry, so we
+    // count them separately and add to the expected total.
+    // See llvm/llvm-project commits 3fa3e65d..caaaf2ee, d069d2f6..3a7f73d9,
+    // 2b08718b..06c93976 for examples.
     let expected_file_count = match mode {
         TestMode::UniDiff => {
             // `--numstat` format:
@@ -275,7 +312,7 @@ fn process_commit(repo: &PathBuf, parent: &str, child: &str, mode: TestMode) -> 
             // - `-\t-\tpath` for binary files (skipped - no patch data in unidiff)
             // - `0\t0\tpath` for empty/no-content changes (skipped)
             let numstat = git(repo, &["diff", "--numstat", "--no-renames", parent, child]);
-            numstat
+            let text_files = numstat
                 .lines()
                 .filter(|l| !l.is_empty())
                 .fold(0, |count, line| {
@@ -285,13 +322,17 @@ fn process_commit(repo: &PathBuf, parent: &str, child: &str, mode: TestMode) -> 
                     } else {
                         count + 1
                     }
-                })
+                });
+            let raw = git(repo, &["diff", "--raw", "--no-renames", parent, child]);
+            let type_changes = count_type_changes(&raw);
+            text_files + type_changes
         }
         TestMode::GitDiff => {
             // With `--binary`, all files including binary ones have patch data.
-            // Use `--raw` to count total files changed.
             let raw = git(repo, &["diff", "--raw", parent, child]);
-            raw.lines().filter(|l| !l.is_empty()).count()
+            let total = raw.lines().filter(|l| !l.is_empty()).count();
+            let type_changes = count_type_changes(&raw);
+            total + type_changes
         }
     };
 
@@ -316,7 +357,7 @@ fn process_commit(repo: &PathBuf, parent: &str, child: &str, mode: TestMode) -> 
     };
 
     // Verify we parsed the same number of patches as git reports files changed.
-    // This catches cases where patches are silently skipped.
+    // This catches both missing and spurious patches.
     if patchset.len() != expected_file_count {
         let n = patchset.len();
         panic!(
