@@ -278,15 +278,14 @@ fn process_commit(repo: &PathBuf, parent: &str, child: &str, mode: TestMode) -> 
             numstat
                 .lines()
                 .filter(|l| !l.is_empty())
-                .fold((0, 0), |(expected, pre_skipped), line| {
+                .fold(0, |count, line| {
                     if line.starts_with("-\t-\t") || line.starts_with("0\t0\t") {
                         skipped += 1;
-                        (expected, pre_skipped + 1)
+                        count
                     } else {
-                        (expected + 1, pre_skipped)
+                        count + 1
                     }
                 })
-                .0
         }
         TestMode::GitDiff => {
             // With `--binary`, all files including binary ones have patch data.
